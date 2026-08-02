@@ -256,7 +256,6 @@ struct ChatInfoView: View {
                             .frame(minWidth: 88, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel(isMuted(info) ? "Unmute notifications" : "Mute notifications")
 
                         Button {
                             openConversationSearch()
@@ -269,7 +268,6 @@ struct ChatInfoView: View {
                             .frame(minWidth: 88, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel("Search in conversation")
                     }
                 }
             }
@@ -433,7 +431,6 @@ struct ChatInfoView: View {
                 NavigationLink(value: ChatInfoDestination.commonGroups(userId: userId, count: commonGroupCount)) {
                     LabeledContent("Groups in common", value: commonGroupCount.formatted())
                 }
-                .accessibilityHint("Opens the groups in common")
             }
         }
     }
@@ -482,7 +479,6 @@ struct ChatInfoView: View {
                         NavigationLink(value: ChatInfoDestination.members(.members)) {
                             LabeledContent(title, value: memberCount.formatted())
                         }
-                        .accessibilityHint("Opens the \(title.lowercased()) list")
                     } else {
                         LabeledContent(title, value: memberCount.formatted())
                     }
@@ -492,21 +488,18 @@ struct ChatInfoView: View {
                     NavigationLink(value: ChatInfoDestination.members(.administrators)) {
                         LabeledContent("Administrators", value: administratorCount.formatted())
                     }
-                    .accessibilityHint("Opens the administrators list")
                 }
 
                 if let restrictedCount = info.restrictedCount, restrictedCount > 0 {
                     NavigationLink(value: ChatInfoDestination.members(.restricted)) {
                         LabeledContent("Restricted", value: restrictedCount.formatted())
                     }
-                    .accessibilityHint("Opens the restricted members list")
                 }
 
                 if let bannedCount = info.bannedCount, bannedCount > 0 {
                     NavigationLink(value: ChatInfoDestination.members(.banned)) {
                         LabeledContent("Banned", value: bannedCount.formatted())
                     }
-                    .accessibilityHint("Opens the banned members list")
                 }
             }
         }
@@ -561,8 +554,6 @@ struct ChatInfoView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isPublicChat ? "Link: \(url.absoluteString)" : "Username: \(username)")
-        .accessibilityHint("Opens the link")
         .contextMenu {
             if copyValue != url.absoluteString {
                 Button("Copy") { UIPasteboard.general.string = copyValue }

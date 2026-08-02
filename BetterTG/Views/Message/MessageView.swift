@@ -91,19 +91,40 @@ struct MessageView: View {
                     )
                 }
 
-                if customMessage.messageDocument != nil
+                if let messagePoll = customMessage.messagePoll {
+                    TelegramPollView(
+                        content: messagePoll,
+                        message: customMessage.message,
+                        service: chatVM.service,
+                    ) {
+                        Text(messagePoll.poll.question.text)
+                            .accessibilityIdentifier("message-\(customMessage.id)")
+                            .accessibilityLabel(pollAccessibilityContextDescription)
+                            .accessibilityActions {
+                                messageAccessibilityActions
+                            }
+                    }
+                } else if customMessage.messageDocument != nil
                     || customMessage.messagePhoto != nil
                     || customMessage.messageVideo != nil
                     || customMessage.messageVoiceNote != nil
                     || customMessage.messageAudio != nil
+                    || customMessage.messageSticker != nil
                     || !customMessage.album.isEmpty
                 {
                     MessageContentView(
                         customMessage: customMessage,
                         audioPlaylist: audioPlaylist,
+                        service: chatVM.service,
                         onMediaTap: openAlbum,
                         onVoiceNoteLocalPathResolved: { voiceNoteLocalPath = $0 },
                     )
+                }
+
+                if let linkPreview, linkPreview.showAboveText {
+                    TelegramLinkPreviewView(preview: linkPreview, service: chatVM.service)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
                 }
 
                 if let formattedText = customMessage.formattedText {
@@ -115,12 +136,20 @@ struct MessageView: View {
                                 || customMessage.forwardedFrom != nil ? -8 : 0,
                         )
                 }
+
+                if let linkPreview, !linkPreview.showAboveText {
+                    TelegramLinkPreviewView(preview: linkPreview, service: chatVM.service)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                }
             }
-            .background(
-                chatVM.highlightedMessageId == customMessage.id
-                    ? .white.opacity(0.5)
-                    : (customMessage.serviceMessageText == nil ? .gray6 : .gray6.opacity(0.75)),
-            )
+            .background {
+                if !isStickerMessage {
+                    chatVM.highlightedMessageId == customMessage.id
+                        ? Color.white.opacity(0.5)
+                        : (customMessage.serviceMessageText == nil ? Color.gray6 : Color.gray6.opacity(0.75))
+                }
+            }
             .clipShape(.rect(cornerRadius: 20))
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 3) {
@@ -140,15 +169,21 @@ struct MessageView: View {
             .contextMenu {
                 messageContextMenu
             }
-            .modify { messageAccessibilityElement($0) }
-            .accessibilityHidden(!textLinks.isEmpty)
+            .modify {
+                if isPollMessage {
+                    $0
+                } else {
+                    messageAccessibilityElement($0)
+                }
+            }
+            .accessibilityHidden(hasAccessibilityGroup)
 
             if !customMessage.message.isOutgoing, !messageReactions.isEmpty {
                 reactionsButton
             }
         }
         .modify {
-            if textLinks.isEmpty {
+            if !hasAccessibilityGroup {
                 $0
             } else {
                 linkAccessibilityGroup($0)
@@ -213,9 +248,34 @@ struct MessageView: View {
         customMessage.senderUser?.firstName ?? customMessage.senderChatTitle ?? "Unknown"
     }
 
+    private var isStickerMessage: Bool {
+        customMessage.messageSticker != nil
+    }
+
+    private var isPollMessage: Bool {
+        customMessage.messagePoll != nil
+    }
+
     private var textLinks: [TelegramTextLink] {
         guard let formattedText = customMessage.formattedText else { return [] }
         return TelegramTextFormatting.links(in: formattedText)
+    }
+
+    private var linkPreview: LinkPreview? {
+        telegramMessageLinkPreview(customMessage.message)
+    }
+
+    private var separatePreviewAccessibilityLink: TelegramLinkPreviewPresentation? {
+        guard let linkPreview else { return nil }
+        let presentation = TelegramLinkPreviewPresentation(linkPreview)
+        guard let destination = presentation.url,
+              !textLinks.contains(where: { telegramURLsReferToSameResource($0.url, destination) })
+        else { return nil }
+        return presentation
+    }
+
+    private var hasAccessibilityGroup: Bool {
+        !isPollMessage && (!textLinks.isEmpty || separatePreviewAccessibilityLink != nil)
     }
 
     private var audioPlaylist: [Audio] {
@@ -272,11 +332,27 @@ struct MessageView: View {
         return reply.messageId != 0
     }
 
+    private var pollAccessibilityContextDescription: String {
+        var parts = [customMessage.message.isOutgoing ? "You" : channelOrGroupAwareSenderName]
+        if let poll = customMessage.messagePoll?.poll {
+            parts.append(poll.type.isQuiz ? "Quiz" : "Poll")
+            parts.append(poll.question.text)
+        }
+        parts.append(telegramMessageDateDescription(customMessage.message.date))
+        if let status = telegramMessageDeliveryStatus(
+            customMessage.message,
+            lastReadOutboxMessageId: chatVM.customChat.lastReadOutboxMessageId,
+        ) {
+            parts.append(status)
+        }
+        return parts.joined(separator: ", ")
+    }
+
     private var reactionsButton: some View {
         TelegramMessageReactionsView(reactions: messageReactions) {
             showReactionDetails = true
         }
-        .accessibilityHidden(!textLinks.isEmpty)
+        .accessibilityHidden(hasAccessibilityGroup)
     }
 
     private func linkAccessibilityGroup(_ content: some View) -> some View {
@@ -295,6 +371,11 @@ struct MessageView: View {
                                 $0
                             }
                         }
+                }
+                if let preview = separatePreviewAccessibilityLink, let destination = preview.url {
+                    Link(preview.accessibilityLinkLabel, destination: destination)
+                        .accessibilityRemoveTraits(.isButton)
+                        .accessibilityAddTraits(.isLink)
                 }
                 if !messageReactions.isEmpty {
                     Button("Reactions") { showReactionDetails = true }

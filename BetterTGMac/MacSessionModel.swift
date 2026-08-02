@@ -30,6 +30,25 @@ private enum MacMessageSenderKey: Hashable {
     case user(Int64)
 }
 
+/// Keep TDLib's high-volume update stream off the main queue unless the macOS presentation model
+/// actually consumes the update. Cold chats can emit many file-progress and synchronization
+/// updates; scheduling those no-op events on MainActor can starve AppKit input handling.
+private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
+    switch update {
+    case .updateBasicGroup,
+         .updateBasicGroupFullInfo,
+         .updateChatAction,
+         .updateNotificationGroup,
+         .updateSupergroup,
+         .updateSupergroupFullInfo,
+         .updateUser,
+         .updateUserStatus:
+        true
+    default:
+        false
+    }
+}
+
 // MARK: - MacSessionModel
 
 @MainActor @Observable final class MacSessionModel {
@@ -39,6 +58,8 @@ private enum MacMessageSenderKey: Hashable {
         let session = TelegramSession()
         self.session = session
         self.service = session
+        self.linkPreviewComposer = TelegramLinkPreviewComposer(service: session)
+        self.editLinkPreviewComposer = TelegramLinkPreviewComposer(service: session)
         self.pushNotifications = TelegramApplePushRegistration(
             service: session,
             isAppSandbox: Self.isAppSandbox,
@@ -57,8 +78,6 @@ private enum MacMessageSenderKey: Hashable {
     var focusedChatId: Int64?
     var openedChatId: Int64?
     var messages = TelegramMessageSnapshot.empty(chatId: 0)
-    var messageText = ""
-    var editMessageText = ""
     var editingMessage: Message?
     var replyingToMessage: Message?
     var messageCapabilities = [Int64: MacMessageCapabilities]()
@@ -96,12 +115,18 @@ private enum MacMessageSenderKey: Hashable {
     var conversationSearchSelectedIndex: Int?
     var conversationSearchTotalCount = 0
     var conversationSearchError: String?
+    var pinnedMessages = [Message]()
+    var isLoadingPinnedMessages = false
+    var pinnedMessagesError: String?
     var navigationTargetMessageId: Int64?
     var latestHistoryTargetMessageId: Int64?
     var openedUnreadCount = 0
     var openedLastReadInboxMessageId: Int64 = 0
     var conversationHeaderBaseStatus: String?
     var conversationHeaderActivities = [MessageSender: ChatAction]()
+
+    let linkPreviewComposer: TelegramLinkPreviewComposer
+    let editLinkPreviewComposer: TelegramLinkPreviewComposer
 
     @ObservationIgnored var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored var loadedChatFolderIds = Set<MacChatFolderID>()
@@ -112,12 +137,26 @@ private enum MacMessageSenderKey: Hashable {
     @ObservationIgnored var conversationSearchNextFromMessageId: Int64 = 0
     @ObservationIgnored var conversationSearchNextOffset = ""
     @ObservationIgnored var conversationSearchUsesSecretMessages = false
+    @ObservationIgnored var pinnedMessagesTask: Task<Void, Never>?
+    @ObservationIgnored var pinnedMessagesGeneration: UInt64 = 0
     @ObservationIgnored var historyRequestGeneration: UInt64 = 0
     @ObservationIgnored var service: any TelegramService
     @ObservationIgnored var draftReplyLoadTask: Task<Void, Never>?
 
     @ObservationIgnored var conversationHeaderTask: Task<Void, Never>?
     @ObservationIgnored var openedChatType: ChatType?
+
+    var messageText = "" {
+        didSet { linkPreviewComposer.update(text: FormattedText(entities: [], text: messageText)) }
+    }
+
+    var editMessageText = "" {
+        didSet { editLinkPreviewComposer.update(text: FormattedText(entities: [], text: editMessageText)) }
+    }
+
+    var activeLinkPreviewComposer: TelegramLinkPreviewComposer {
+        editingMessage == nil ? linkPreviewComposer : editLinkPreviewComposer
+    }
 
     var chatItems: [ChatListItemState] {
         chatList.chatIds(in: selectedChatList).compactMap { chatList.items[$0] }
@@ -311,6 +350,9 @@ private enum MacMessageSenderKey: Hashable {
 
         let previousChatId = openedChatId
         openedChatId = chatId
+        pinnedMessages = []
+        pinnedMessagesError = nil
+        refreshPinnedMessages(for: chatId)
         restoreDraft(openingChat?.draftMessage, chatId: chatId)
         prepareConversationHeader(for: chatId, fallbackKind: openingChat?.kind)
         messages = .empty(chatId: chatId)
@@ -342,22 +384,21 @@ private enum MacMessageSenderKey: Hashable {
             if let previousChatId {
                 // Closing the old chat is independent from opening the new one. Waiting for its
                 // TDLib round trip delayed the new chat's local-history request for no UI benefit.
-                Task { _ = try? await service.closeChat(chatId: previousChatId) }
+                Task { _ = try? await self.service.closeChat(chatId: previousChatId) }
             }
             guard !Task.isCancelled, openedChatId == chatId else { return }
             _ = try? await service.openChat(chatId: chatId)
-            let historyMessages: [Message]
-            if messageId == nil,
-               messages.hasMergedHistory,
-               !messages.orderedMessageIds.isEmpty
-            {
-                // The subscription already delivered this chat's retained history. Fetching and
-                // merging the same page again only increments the snapshot version and forces a
-                // second table refresh immediately after the cached rows became visible.
-                historyMessages = messages.orderedMessageIds.compactMap { messages.messages[$0] }
-            } else {
-                historyMessages = await loadInitialHistory(chatId: chatId, around: messageId)
-            }
+            let historyMessages: [Message] =
+                if messageId == nil,
+                messages.hasMergedHistory,
+                !messages.orderedMessageIds.isEmpty {
+                    // The subscription already delivered this chat's retained history. Fetching and
+                    // merging the same page again only increments the snapshot version and forces a
+                    // second table refresh immediately after the cached rows became visible.
+                    messages.orderedMessageIds.compactMap { self.messages.messages[$0] }
+                } else {
+                    await loadInitialHistory(chatId: chatId, around: messageId)
+                }
             guard !Task.isCancelled, openedChatId == chatId else { return }
             if let newestMessageId = historyMessages.max(by: { $0.id < $1.id })?.id {
                 _ = try? await service.viewMessages(
@@ -411,8 +452,7 @@ private enum MacMessageSenderKey: Hashable {
         selectedDocumentURLs = panel.urls
     }
 
-    @discardableResult
-    func attachPastedFiles(_ urls: [URL]) -> Bool {
+    @discardableResult func attachPastedFiles(_ urls: [URL]) -> Bool {
         guard !isRecordingVoice, editingMessage == nil else { return false }
         let pastedFiles = urls.filter { url in
             guard url.isFileURL else { return false }
@@ -599,6 +639,22 @@ private enum MacMessageSenderKey: Hashable {
         return file.local.path
     }
 
+    func localStickerPath(fileId: Int) async -> String? {
+        if let cachedPath = stickerPaths[fileId] {
+            return cachedPath
+        }
+        guard let file = try? await service.downloadFile(
+            fileId: fileId,
+            limit: 0,
+            offset: 0,
+            priority: 24,
+            synchronous: true,
+        ), file.local.isDownloadingCompleted, !file.local.path.isEmpty
+        else { return nil }
+        stickerPaths[fileId] = file.local.path
+        return file.local.path
+    }
+
     func beginReply(to message: Message) {
         draftReplyLoadTask?.cancel()
         draftReplyLoadTask = nil
@@ -613,6 +669,7 @@ private enum MacMessageSenderKey: Hashable {
         editingMessage = nil
         replyingToMessage = nil
         editMessageText = ""
+        editLinkPreviewComposer.configure(preview: nil, options: nil)
     }
 
     func beginEditing(_ message: Message) {
@@ -620,6 +677,10 @@ private enum MacMessageSenderKey: Hashable {
         selectedPhotoURLs = []
         selectedDocumentURLs = []
         replyingToMessage = nil
+        editLinkPreviewComposer.configure(
+            preview: telegramMessageLinkPreview(message),
+            options: telegramMessageLinkPreviewOptions(message),
+        )
         editingMessage = message
         editMessageText = text
     }
@@ -687,7 +748,7 @@ private enum MacMessageSenderKey: Hashable {
             messageId: message.id,
             rowSize: 8,
         ),
-              openedChatId == message.chatId
+            openedChatId == message.chatId
         else { return }
         messageAvailableReactions[message.id] = telegramAvailableReactions(availableReactions)
     }
@@ -1012,6 +1073,23 @@ private enum MacMessageSenderKey: Hashable {
         }
     }
 
+    func saveCurrentDraft() {
+        guard editingMessage == nil, let chatId = openedChatId else { return }
+        let draft = TelegramDrafts.make(
+            formattedText: FormattedText(entities: [], text: messageText),
+            replyMessageId: replyingToMessage?.id,
+            linkPreviewOptions: linkPreviewComposer.options,
+        )
+        let service = service
+        Task {
+            _ = try? await service.setChatDraftMessage(
+                chatId: chatId,
+                draftMessage: draft,
+                topicId: nil,
+            )
+        }
+    }
+
     // MARK: Private
 
     private static var databaseDirectoryName: String {
@@ -1054,6 +1132,7 @@ private enum MacMessageSenderKey: Hashable {
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var documentPaths = [Int: String]()
     @ObservationIgnored private var photoPaths = [Int: String]()
+    @ObservationIgnored private var stickerPaths = [Int: String]()
     @ObservationIgnored private var preferredCountryId: String?
     @ObservationIgnored private var videoPaths = [Int: String]()
     @ObservationIgnored private var recordingTimer: Task<Void, Never>?
@@ -1090,19 +1169,6 @@ private enum MacMessageSenderKey: Hashable {
         }
     }
 
-    func saveCurrentDraft() {
-        guard editingMessage == nil, let chatId = openedChatId else { return }
-        let draft = TelegramDrafts.make(text: messageText, replyMessageId: replyingToMessage?.id)
-        let service = service
-        Task {
-            _ = try? await service.setChatDraftMessage(
-                chatId: chatId,
-                draftMessage: draft,
-                topicId: nil,
-            )
-        }
-    }
-
     private func clearDraft(chatId: Int64) {
         let service = service
         Task {
@@ -1117,6 +1183,13 @@ private enum MacMessageSenderKey: Hashable {
     private func restoreDraft(_ draft: DraftMessage?, chatId: Int64) {
         draftReplyLoadTask?.cancel()
         draftReplyLoadTask = nil
+        let linkPreviewOptions: LinkPreviewOptions? =
+            if let draft, case .draftMessageContentText(let content) = draft.content {
+                content.linkPreviewOptions
+            } else {
+                nil
+            }
+        linkPreviewComposer.configure(preview: nil, options: linkPreviewOptions)
         messageText = TelegramDrafts.text(from: draft)
         replyingToMessage = nil
 
@@ -1138,6 +1211,7 @@ private enum MacMessageSenderKey: Hashable {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let openedChatId, !text.isEmpty else { return }
         let replyTo = TelegramMessageSending.replyTo(messageId: replyingToMessage?.id)
+        let linkPreviewOptions = linkPreviewComposer.options
         clearDraft(chatId: openedChatId)
         messageText = ""
         replyingToMessage = nil
@@ -1150,7 +1224,10 @@ private enum MacMessageSenderKey: Hashable {
                 try await TelegramMessageSending.send(
                     service: service,
                     chatId: openedChatId,
-                    contents: [TelegramMessageSending.textContent(formattedText)],
+                    contents: [TelegramMessageSending.textContent(
+                        formattedText,
+                        linkPreviewOptions: linkPreviewOptions,
+                    )],
                     replyTo: replyTo,
                 )
             } catch {
@@ -1254,6 +1331,7 @@ private enum MacMessageSenderKey: Hashable {
         if case .messageText = message.content, text.isEmpty {
             return
         }
+        let linkPreviewOptions = editLinkPreviewComposer.options
         editingMessage = nil
         editMessageText = ""
 
@@ -1264,6 +1342,7 @@ private enum MacMessageSenderKey: Hashable {
                 messageId: message.id,
                 messageContent: message.content,
                 newText: FormattedText(entities: [], text: text),
+                linkPreviewOptions: linkPreviewOptions,
             )
         }
     }
@@ -1298,6 +1377,9 @@ private enum MacMessageSenderKey: Hashable {
         // round-trip a `getMessage` RPC here just to pick it up. Only the message's cached
         // capabilities (edit/pin/reaction permissions) still need invalidating, since those
         // aren't part of `Message` itself.
+        if case .messagePinChanged = snapshot.change {
+            refreshPinnedMessages()
+        }
         let messageId: Int64? =
             switch snapshot.change {
             case .messageContentChanged(let update):
@@ -1331,12 +1413,15 @@ private enum MacMessageSenderKey: Hashable {
             .store(in: &cancellables)
 
         service.updatePublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] update in
-                self?.handleNotificationUpdate(update)
-                self?.handleConversationHeaderUpdate(update)
-            }
-            .store(in: &cancellables)
+            // Filter on TelegramUpdateStore's background queue, before `receive(on:)` schedules
+            // work on AppKit's event loop. The two handlers below ignore every other update type.
+                .filter(isMacSessionPresentationUpdate)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] update in
+                    self?.handleNotificationUpdate(update)
+                    self?.handleConversationHeaderUpdate(update)
+                }
+                .store(in: &cancellables)
     }
 
     private func applyAuthorizationState(_ state: AuthorizationState) {
@@ -1399,6 +1484,8 @@ private enum MacMessageSenderKey: Hashable {
         countryLoadTask = nil
         conversationHeaderTask?.cancel()
         conversationHeaderTask = nil
+        pinnedMessagesTask?.cancel()
+        pinnedMessagesTask = nil
         messageSubscription?.cancel()
         messageSubscription = nil
         for request in senderNameRequests.values {
@@ -1414,6 +1501,9 @@ private enum MacMessageSenderKey: Hashable {
         openedChatType = nil
         conversationHeaderBaseStatus = nil
         conversationHeaderActivities = [:]
+        pinnedMessages = []
+        pinnedMessagesError = nil
+        isLoadingPinnedMessages = false
         messages = .empty(chatId: 0)
         loadedChatFolderIds = []
         messageText = ""

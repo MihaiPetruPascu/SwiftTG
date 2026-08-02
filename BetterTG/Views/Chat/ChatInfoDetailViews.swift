@@ -110,8 +110,6 @@ struct ChatInfoMembersView: View {
                     memberRow(member)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(memberAccessibilityLabel(member))
-                .accessibilityHint("Opens a conversation with this member")
             }
 
             if hasMore {
@@ -124,11 +122,7 @@ struct ChatInfoMembersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search \(displayTitle.lowercased())")
         .task(id: query) {
-            if !query.isEmpty {
-                try? await Task.sleep(for: .milliseconds(250))
-            }
-            guard !Task.isCancelled else { return }
-            await reload()
+            await reload(query: query)
         }
     }
 
@@ -172,23 +166,17 @@ struct ChatInfoMembersView: View {
         .contentShape(.rect)
     }
 
-    private func memberAccessibilityLabel(_ member: ChatInfoMember) -> String {
-        [member.name, member.role, member.presence]
-            .compactMap(\.self)
-            .joined(separator: ", ")
-    }
-
     private func loadNextPage() {
         guard !isLoading, hasMore else { return }
         Task { await loadPage() }
     }
 
-    private func reload() async {
+    private func reload(query requestedQuery: String) async {
         loadGeneration &+= 1
         let generation = loadGeneration
         isLoading = true
-        let page = await loadMembersPage(query: query, offset: 0)
-        guard !Task.isCancelled, generation == loadGeneration else { return }
+        let page = await loadMembersPage(query: requestedQuery, offset: 0)
+        guard !Task.isCancelled, generation == loadGeneration, requestedQuery == query else { return }
         members = page?.members ?? []
         totalCount = page?.totalCount ?? 0
         hasMore = page?.hasMore ?? false
@@ -368,8 +356,6 @@ struct ChatInfoCommonGroupsView: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(group.chat.title)
-                .accessibilityHint("Opens this group")
             }
 
             if hasMore {
@@ -480,37 +466,6 @@ private func chatInfoUserPresence(_ user: User) -> String {
     case .userTypeDeleted:
         "Deleted account"
     case .userTypeRegular, .userTypeUnknown:
-        chatInfoPresenceDescription(user.status)
-    }
-}
-
-private func chatInfoPresenceDescription(
-    _ status: UserStatus,
-    now: Foundation.Date = Foundation.Date(),
-    calendar: Calendar = .autoupdatingCurrent,
-) -> String {
-    switch status {
-    case .userStatusOnline:
-        return "Online"
-    case .userStatusOffline(let value):
-        guard value.wasOnline > 0 else { return "Offline" }
-        let date = Foundation.Date(timeIntervalSince1970: TimeInterval(value.wasOnline))
-        if calendar.isDate(date, inSameDayAs: now) {
-            return "Last seen today at \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-           calendar.isDate(date, inSameDayAs: yesterday)
-        {
-            return "Last seen yesterday at \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        return "Last seen \(date.formatted(date: .abbreviated, time: .shortened))"
-    case .userStatusRecently:
-        return "Last seen recently"
-    case .userStatusLastWeek:
-        return "Last seen within a week"
-    case .userStatusLastMonth:
-        return "Last seen within a month"
-    case .userStatusEmpty:
-        return "Last seen a long time ago"
+        telegramUserPresenceDescription(user.status)
     }
 }

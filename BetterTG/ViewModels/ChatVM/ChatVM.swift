@@ -28,16 +28,18 @@ import UniformTypeIdentifiers
             draftMessage: customChat.draftMessage,
         )
         self.voiceRecorder = VoiceRecordingController(chatId: customChat.chat.id, service: service)
-        if let user = customChat.user {
-            self.onlineStatus = getOnlineStatus(from: user.status)
-        } else {
-            self.onlineStatus = conversationCommunityStatus(for: customChat)
-        }
+        self.onlineStatus =
+            if let user = customChat.user {
+                getOnlineStatus(from: user.status)
+            } else {
+                conversationCommunityStatus(for: customChat)
+            }
     }
 
     deinit {
         conversationStatusTask?.cancel()
         conversationSearchTask?.cancel()
+        pinnedMessagesTask?.cancel()
         guard hasStarted else { return }
         let chatId = customChat.chat.id
         let service = service
@@ -46,27 +48,13 @@ import UniformTypeIdentifiers
 
     // MARK: Internal
 
-    /// Opens the chat and kicks off history loading. `ChatView` is a SwiftUI value type that gets
-    /// reconstructed (and this `ChatVM` re-initialized) on every unrelated body re-evaluation of its
-    /// parent, so opening the chat and fetching history must not happen in `init` - only when the
-    /// view genuinely appears, exactly once, via `.task`.
-    func start() {
-        guard !hasStarted else { return }
-        hasStarted = true
+    // MARK: End facade
 
-        let chatId = customChat.chat.id
-        Task { _ = try? await service.openChat(chatId: chatId) }
-        setPublishers()
-        refreshConversationStatus()
-        loadMessages()
-        Media.shared.onChatOpen(title: customChat.chat.title)
-
-        Task.background {
-            guard let draftMessage = self.customChat.draftMessage else { return }
-            let replyMessage = await self.getInputReplyToMessage(draftMessage.replyTo)
-            withAnimation { self.composer.replyMessage = replyMessage }
-        }
-    }
+    /// Starts fetching the next batch once the user is getting close to the start of what's loaded,
+    /// not only once they've hit it exactly - a VoiceOver swipe (or a fast scroll) that lands right on
+    /// the edge would otherwise stall waiting on the network round trip before it has anything further
+    /// to move to.
+    static let loadMoreLookahead = 10
 
     var customChat: CustomChat
     let initialMessageId: Int64?
@@ -93,23 +81,16 @@ import UniformTypeIdentifiers
     var conversationSearchSelectedIndex: Int?
     var conversationSearchTotalCount = 0
     var conversationSearchError: String?
+    var pinnedMessages = [Message]()
+    var isLoadingPinnedMessages = false
+    var pinnedMessagesError: String?
     @ObservationIgnored var dateFormatter: DateFormatter = {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm"
         return dateFormatter
     }()
-    @ObservationIgnored private var lastSeenDateFormatter: DateFormatter = {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd.MM.yy"
-        return dateFormatter
-    }()
 
-    @ObservationIgnored private var hasStarted = false
     @ObservationIgnored var loadingMessagesTask: Task<Void, Never>?
-    /// Bumped every time a new history-loading task starts, so a superseded task's completion
-    /// can tell it's stale and avoid clobbering `loadingMessagesTask`/`pendingNavigationMessageId`
-    /// out from under a newer one (cancellation doesn't stop a network call already in flight).
-    @ObservationIgnored private var loadingMessagesGeneration = 0
     @ObservationIgnored let service: any TelegramService
     @ObservationIgnored var appliedMessageSnapshotVersion: UInt64?
     @ObservationIgnored var latestMessageSnapshot: TelegramMessageSnapshot?
@@ -134,56 +115,13 @@ import UniformTypeIdentifiers
     @ObservationIgnored var conversationSearchNextFromMessageId: Int64 = 0
     @ObservationIgnored var conversationSearchNextOffset = ""
     @ObservationIgnored var conversationSearchUsesSecretMessages = false
+    @ObservationIgnored var pinnedMessagesTask: Task<Void, Never>?
+    @ObservationIgnored var pinnedMessagesGeneration = 0
     // Scroll
     @ObservationIgnored var isAtBottom = true
     var showScrollToBottomButton = false
     @ObservationIgnored var scrollViewProxy: ScrollViewProxy?
     @ObservationIgnored var cancellables = Set<AnyCancellable>()
-    @ObservationIgnored private var preparingVoiceNoteFileIds = Set<Int>()
-
-    func refreshConversationStatus() {
-        conversationStatusTask?.cancel()
-        let type = customChat.type
-        conversationStatusTask = Task { [weak self] in
-            guard let self else { return }
-
-            let status: String? =
-                switch type {
-                case .group(let currentGroup):
-                    if let group = try? await service.getBasicGroup(basicGroupId: currentGroup.id) {
-                        if group.memberCount > 0 {
-                            conversationGroupStatus(memberCount: group.memberCount)
-                        } else if let fullInfo = try? await service.getBasicGroupFullInfo(basicGroupId: group.id) {
-                            conversationGroupStatus(memberCount: fullInfo.members.count)
-                        } else {
-                            "Group"
-                        }
-                    } else {
-                        nil
-                    }
-                case .supergroup(let currentGroup):
-                    if let group = try? await service.getSupergroup(supergroupId: currentGroup.id) {
-                        if group.memberCount > 0 {
-                            conversationSupergroupStatus(isChannel: group.isChannel, memberCount: group.memberCount)
-                        } else if let fullInfo = try? await service.getSupergroupFullInfo(supergroupId: group.id) {
-                            conversationSupergroupStatus(
-                                isChannel: group.isChannel,
-                                memberCount: fullInfo.memberCount,
-                            )
-                        } else {
-                            group.isChannel ? "Channel" : "Group"
-                        }
-                    } else {
-                        nil
-                    }
-                case .bot, .user:
-                    nil
-                }
-
-            guard !Task.isCancelled, let status else { return }
-            withAnimation { self.onlineStatus = status }
-        }
-    }
 
     // MARK: Composer/Recorder facade
 
@@ -242,6 +180,10 @@ import UniformTypeIdentifiers
         set { composer.showPhotoPickerView = newValue }
     }
 
+    var activeLinkPreviewComposer: TelegramLinkPreviewComposer {
+        composer.activeLinkPreviewComposer
+    }
+
     var sendMessageTask: Task<Void, Never>? {
         get { composer.sendMessageTask }
         set { composer.sendMessageTask = newValue }
@@ -279,6 +221,73 @@ import UniformTypeIdentifiers
         set { voiceRecorder.wave = newValue }
     }
 
+    /// Opens the chat and kicks off history loading. `ChatView` is a SwiftUI value type that gets
+    /// reconstructed (and this `ChatVM` re-initialized) on every unrelated body re-evaluation of its
+    /// parent, so opening the chat and fetching history must not happen in `init` - only when the
+    /// view genuinely appears, exactly once, via `.task`.
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+
+        let chatId = customChat.chat.id
+        Task { _ = try? await service.openChat(chatId: chatId) }
+        setPublishers()
+        refreshConversationStatus()
+        refreshPinnedMessages()
+        loadMessages()
+        Media.shared.onChatOpen(title: customChat.chat.title)
+
+        Task.background {
+            guard let draftMessage = self.customChat.draftMessage else { return }
+            let replyMessage = await self.getInputReplyToMessage(draftMessage.replyTo)
+            withAnimation { self.composer.replyMessage = replyMessage }
+        }
+    }
+
+    func refreshConversationStatus() {
+        conversationStatusTask?.cancel()
+        let type = customChat.type
+        conversationStatusTask = Task { [weak self] in
+            guard let self else { return }
+
+            let status: String? =
+                switch type {
+                case .group(let currentGroup):
+                    if let group = try? await service.getBasicGroup(basicGroupId: currentGroup.id) {
+                        if group.memberCount > 0 {
+                            conversationGroupStatus(memberCount: group.memberCount)
+                        } else if let fullInfo = try? await service.getBasicGroupFullInfo(basicGroupId: group.id) {
+                            conversationGroupStatus(memberCount: fullInfo.members.count)
+                        } else {
+                            "Group"
+                        }
+                    } else {
+                        nil
+                    }
+                case .supergroup(let currentGroup):
+                    if let group = try? await service.getSupergroup(supergroupId: currentGroup.id) {
+                        if group.memberCount > 0 {
+                            conversationSupergroupStatus(isChannel: group.isChannel, memberCount: group.memberCount)
+                        } else if let fullInfo = try? await service.getSupergroupFullInfo(supergroupId: group.id) {
+                            conversationSupergroupStatus(
+                                isChannel: group.isChannel,
+                                memberCount: fullInfo.memberCount,
+                            )
+                        } else {
+                            group.isChannel ? "Channel" : "Group"
+                        }
+                    } else {
+                        nil
+                    }
+                case .bot, .user:
+                    nil
+                }
+
+            guard !Task.isCancelled, let status else { return }
+            withAnimation { self.onlineStatus = status }
+        }
+    }
+
     func sendMessage() async { await composer.sendMessage() }
     func stageDocuments(_ urls: [URL]) async { await composer.stageDocuments(urls) }
     func setShowSendButton() { composer.setShowSendButton() }
@@ -299,14 +308,6 @@ import UniformTypeIdentifiers
         }
     }
 
-    // MARK: End facade
-
-    /// Starts fetching the next batch once the user is getting close to the start of what's loaded,
-    /// not only once they've hit it exactly - a VoiceOver swipe (or a fast scroll) that lands right on
-    /// the edge would otherwise stall waiting on the network round trip before it has anything further
-    /// to move to.
-    static let loadMoreLookahead = 10
-
     func loadMoreIfNeeded(distanceFromStart: Int) {
         guard distanceFromStart <= Self.loadMoreLookahead else { return }
         loadMessages()
@@ -317,23 +318,6 @@ import UniformTypeIdentifiers
         let shouldShowButton = !isLastMessageVisible
         guard showScrollToBottomButton != shouldShowButton else { return }
         withAnimation { showScrollToBottomButton = shouldShowButton }
-    }
-    
-    func getLastSeenTime(_ time: Int) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(time))
-
-        let difference = Date().timeIntervalSince1970 - TimeInterval(time)
-        if difference < 60 {
-            return "now"
-        } else if difference < 60 * 60 {
-            return "\(Int(difference / 60)) minutes ago"
-        } else if difference < 60 * 60 * 24 {
-            return "\(Int(difference / 60 / 60)) hours ago"
-        } else if difference < 60 * 60 * 24 * 2 {
-            return "yesterday at \(dateFormatter.string(from: date))"
-        } else {
-            return lastSeenDateFormatter.string(from: date)
-        }
     }
     
     func scrollToLast() {
@@ -434,14 +418,7 @@ import UniformTypeIdentifiers
     }
 
     func getOnlineStatus(from userStatus: UserStatus) -> String {
-        switch userStatus {
-        case .userStatusEmpty: "empty"
-        case .userStatusOnline: /* (let userStatusOnline) */ "online"
-        case .userStatusOffline(let userStatusOffline): "last seen \(getLastSeenTime(userStatusOffline.wasOnline))"
-        case .userStatusRecently: "last seen recently"
-        case .userStatusLastWeek: "last seen last week"
-        case .userStatusLastMonth: "last seen last month"
-        }
+        telegramUserPresenceDescription(userStatus)
     }
     
     func loadMessages() {
@@ -492,14 +469,7 @@ import UniformTypeIdentifiers
     }
 
     func reply(to message: CustomMessage?) {
-        if replyMessage != nil {
-            withAnimation { replyMessage = nil }
-            Task.main(delay: 0.4) {
-                withAnimation { self.replyMessage = message }
-            }
-        } else {
-            withAnimation { replyMessage = message }
-        }
+        withAnimation { replyMessage = message }
     }
 
     func edit(_ message: CustomMessage?) {
@@ -507,14 +477,8 @@ import UniformTypeIdentifiers
             displayedImages.removeAll()
             displayedDocuments.removeAll()
         }
-        if editCustomMessage != nil {
-            withAnimation { editCustomMessage = nil }
-            Task.main(delay: 0.4) {
-                withAnimation { self.editCustomMessage = message }
-            }
-        } else {
-            withAnimation { editCustomMessage = message }
-        }
+        setEditMessageText(from: message?.message)
+        withAnimation { editCustomMessage = message }
     }
 
     func togglePinnedMessage(_ message: Message) {
@@ -574,8 +538,7 @@ import UniformTypeIdentifiers
     /// Plays a voice note, downloading it first if `knownLocalPath` isn't already resolved.
     /// Returns the local path once playback starts, so the caller can cache it - or `nil` if a
     /// download for this file is already in flight or the download failed.
-    @MainActor
-    func toggleVoiceMessage(_ messageVoiceNote: MessageVoiceNote, knownLocalPath: String?) async -> String? {
+    @MainActor func toggleVoiceMessage(_ messageVoiceNote: MessageVoiceNote, knownLocalPath: String?) async -> String? {
         let fileId = messageVoiceNote.voiceNote.voice.id
         voicePlaybackTrace(
             "activation fileId=\(fileId) hasPath=\(knownLocalPath != nil) "
@@ -608,17 +571,7 @@ import UniformTypeIdentifiers
         }
     }
 
-    @MainActor
-    private func startVoicePlayback(path: String, duration: Int) {
-        voicePlaybackTrace(
-            "start requested exists=\(FileManager.default.fileExists(atPath: path)) duration=\(duration)",
-        )
-        TelegramAudioPlayer.shared.stop()
-        Media.shared.toggle(with: path, duration: duration)
-    }
-
-    @MainActor
-    func viewMessage(id: Int64) {
+    @MainActor func viewMessage(id: Int64) {
         pendingViewedMessageIds.insert(id)
         guard viewMessagesTask == nil else { return }
 
@@ -672,7 +625,10 @@ import UniformTypeIdentifiers
         )
         customMessage.senderUser = await senderUserTask
         if case .messageSenderChat = message.senderId {
-            customMessage.senderChatTitle = await TelegramSenderName.displayName(service: service, senderId: message.senderId)
+            customMessage.senderChatTitle = await TelegramSenderName.displayName(
+                service: service,
+                senderId: message.senderId,
+            )
         }
         customMessage.serviceMessageText = await serviceMessageTextTask
         if let reactions = try? await reactionsTask {
@@ -690,20 +646,23 @@ import UniformTypeIdentifiers
             customMessage.replySenderName = try? await service.getChat(chatId: messageSenderChat.chatId).title
         }
         
-        if let serviceMessageText = customMessage.serviceMessageText {
-            customMessage.formattedText = FormattedText(entities: [], text: serviceMessageText)
-        } else {
-            switch message.content {
-            case .messageText(let messageText):
-                customMessage.formattedText = messageText.text
-            case .messagePhoto, .messageVideo, .messageDocument, .messageVoiceNote, .messageAudio:
-                customMessage.formattedText = telegramMessageFormattedText(message)
-            case .messageUnsupported:
-                customMessage.formattedText = FormattedText(entities: [], text: "TDLib not supported")
-            default:
-                customMessage.formattedText = FormattedText(entities: [], text: "BTG not supported")
+        customMessage.formattedText =
+            if let serviceMessageText = customMessage.serviceMessageText {
+                FormattedText(entities: [], text: serviceMessageText)
+            } else {
+                switch message.content {
+                case .messageText(let messageText):
+                    messageText.text
+                case .messageAudio, .messageDocument, .messagePhoto, .messageVideo, .messageVoiceNote:
+                    telegramMessageFormattedText(message)
+                case .messagePoll, .messageSticker:
+                    nil
+                case .messageUnsupported:
+                    FormattedText(entities: [], text: "TDLib not supported")
+                default:
+                    FormattedText(entities: [], text: "BTG not supported")
+                }
             }
-        }
         
         return customMessage
     }
@@ -738,6 +697,21 @@ import UniformTypeIdentifiers
     }
     
     // MARK: Private
+
+    @ObservationIgnored private var hasStarted = false
+    /// Bumped every time a new history-loading task starts, so a superseded task's completion
+    /// can tell it's stale and avoid clobbering `loadingMessagesTask`/`pendingNavigationMessageId`
+    /// out from under a newer one (cancellation doesn't stop a network call already in flight).
+    @ObservationIgnored private var loadingMessagesGeneration = 0
+    @ObservationIgnored private var preparingVoiceNoteFileIds = Set<Int>()
+
+    @MainActor private func startVoicePlayback(path: String, duration: Int) {
+        voicePlaybackTrace(
+            "start requested exists=\(FileManager.default.fileExists(atPath: path)) duration=\(duration)",
+        )
+        TelegramAudioPlayer.shared.stop()
+        Media.shared.toggle(with: path, duration: duration)
+    }
 
     private func openChat(chatId: Int64, messageId: Int64?, movesAccessibilityFocus: Bool = false) {
         Task { @MainActor [weak self] in

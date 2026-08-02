@@ -13,7 +13,6 @@ struct ChatBottomArea: View {
 
     @Namespace var namespace
     @Environment(ChatVM.self) var chatVM
-    @Environment(\.scenePhase) private var scenePhase
 
     /// Thresholds mirror Telegram's own recording button: drag left to cancel,
     /// drag up to lock into hands-free recording.
@@ -91,7 +90,6 @@ struct ChatBottomArea: View {
             guard newPhase != .active else { return }
             Task.background { [chatVM] in await chatVM.updateDraft() }
         }
-        .task(id: chatVM.editCustomMessage) { chatVM.setEditMessageText(from: chatVM.editCustomMessage?.message) }
         .alert("Error", isPresented: $chatVM.errorShown) {
             Text("""
             Access to Microphone isn't granted.
@@ -118,6 +116,18 @@ struct ChatBottomArea: View {
             },
         )) {
             AttachmentPreviewView()
+        }
+        .sheet(isPresented: $showsPollComposer) {
+            TelegramPollComposerView { draft in
+                try await TelegramPollSending.send(
+                    draft: draft,
+                    service: chatVM.service,
+                    chatId: chatVM.customChat.chat.id,
+                    replyToMessageId: chatVM.replyMessage?.id,
+                )
+                chatVM.replyMessage = nil
+                await chatVM.updateDraft()
+            }
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 10)
@@ -169,6 +179,13 @@ struct ChatBottomArea: View {
             UIAccessibility.post(notification: .announcement, argument: "Recording locked")
         }
         .onChange(of: chatVM.displayedImages) { nc.post(name: .localScrollToLastIfNeeded) }
+        .task(id: chatVM.customChat.chat.id) {
+            pollIsAvailable = false
+            pollIsAvailable = await TelegramPollSending.isAvailable(
+                service: chatVM.service,
+                chatId: chatVM.customChat.chat.id,
+            )
+        }
         .onReceive(nc.publisher(for: .localOnSelectedImagesDrop)) { notification in
             guard let selectedImages = notification.object as? [SelectedImage] else { return }
             withAnimation {
@@ -202,6 +219,17 @@ struct ChatBottomArea: View {
                     chatVM.showDocumentPicker = true
                 } label: {
                     Label("Attach Files", systemImage: "folder")
+                }
+                if pollIsAvailable {
+                    Button {
+                        withAnimation {
+                            chatVM.displayedImages.removeAll()
+                            chatVM.displayedDocuments.removeAll()
+                        }
+                        showsPollComposer = true
+                    } label: {
+                        Label("Poll", systemImage: "chart.bar")
+                    }
                 }
             } label: {
                 Label("Attach", systemImage: "paperclip")
@@ -333,32 +361,40 @@ struct ChatBottomArea: View {
         }
     }
 
-    @ViewBuilder var topSide: some View {
-        if let editCustomMessage = chatVM.editCustomMessage {
-            replyMessageView(editCustomMessage, type: .edit)
-        } else if let replyMessage = chatVM.replyMessage {
-            replyMessageView(replyMessage, type: .reply)
+    var topSide: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let editCustomMessage = chatVM.editCustomMessage {
+                replyMessageView(editCustomMessage, type: .edit)
+            } else if let replyMessage = chatVM.replyMessage {
+                replyMessageView(replyMessage, type: .reply)
+            }
+
+            if chatVM.displayedImages.isEmpty,
+               chatVM.displayedDocuments.isEmpty,
+               let preview = chatVM.activeLinkPreviewComposer.preview
+            {
+                linkPreviewAccessory(preview)
+            }
         }
     }
-    
-    @ViewBuilder var textField: some View {
+
+    var textField: some View {
         @Bindable var chatVM = chatVM
-        Group {
-            if chatVM.editCustomMessage == nil {
-                MessageTextEditor("Type a message", text: $chatVM.text, onSubmit: submitMessage) { images in
+        let isEditing = chatVM.editCustomMessage != nil
+        return MessageTextEditor(
+            isEditing ? "Edit a message" : "Type a message",
+            text: isEditing ? $chatVM.editMessageText : $chatVM.text,
+            contextID: chatVM.editCustomMessage.map { AnyHashable($0.id) } ?? AnyHashable("composer"),
+            onSubmit: submitMessage,
+            onPasteImages: isEditing
+                ? nil
+                : { images in
                     withAnimation {
                         chatVM.displayedDocuments.removeAll()
                         chatVM.displayedImages.append(contentsOf: images)
                     }
-                }
-            } else {
-                MessageTextEditor(
-                    "Edit a message",
-                    text: $chatVM.editMessageText,
-                    onSubmit: submitMessage,
-                )
-            }
-        }
+                },
+        )
         .focused(focused)
         .lineLimit(10)
         .padding(.horizontal, 5)
@@ -420,6 +456,30 @@ struct ChatBottomArea: View {
         .padding(.bottom, 6)
     }
 
+    func linkPreviewAccessory(_ preview: LinkPreview) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            TelegramLinkPreviewView(preview: preview, service: chatVM.service)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Menu("Link Preview Options", systemImage: "ellipsis.circle") {
+                Button(chatVM.activeLinkPreviewComposer.showsAboveText ? "Move Below Text" : "Move Above Text") {
+                    chatVM.activeLinkPreviewComposer.togglePosition()
+                }
+                if preview.hasLargeMedia {
+                    Button(chatVM.activeLinkPreviewComposer.showsLargeMedia ? "Use Small Media" : "Use Large Media") {
+                        chatVM.activeLinkPreviewComposer.toggleMediaSize()
+                    }
+                }
+            }
+            .labelStyle(.iconOnly)
+
+            Button("Remove Link Preview", systemImage: "xmark") {
+                chatVM.activeLinkPreviewComposer.dismiss()
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
     func replyMessageView(_ customMessage: CustomMessage, type: ReplyMessageType) -> some View {
         HStack {
             ReplyMessageView(customMessage: customMessage, type: type, onTap: {
@@ -448,6 +508,11 @@ struct ChatBottomArea: View {
     }
 
     // MARK: Private
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var showsPollComposer = false
+    @State private var pollIsAvailable = false
 
     @State private var hasBegunRecording = false
 
