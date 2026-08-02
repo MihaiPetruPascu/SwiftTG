@@ -1,0 +1,24 @@
+//
+//  BusinessMessages.swift
+//  tl2swift
+//
+//  Generated automatically. Any changes will be lost!
+//  Based on TDLib 1.8.65-a17f87c4
+//  https://github.com/tdlib/td/tree/a17f87c4
+//
+
+import Foundation
+
+
+/// Contains a list of messages from a business account as received by a bot
+public struct BusinessMessages: Codable, Equatable, Hashable {
+
+    /// List of business messages
+    public let messages: [BusinessMessage]
+
+
+    public init(messages: [BusinessMessage]) {
+        self.messages = messages
+    }
+}
+

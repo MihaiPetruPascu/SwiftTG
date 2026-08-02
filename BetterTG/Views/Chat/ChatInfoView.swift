@@ -22,6 +22,29 @@ private struct ChatInfoData {
     var isBot = false
     var blockableUserId: Int64?
     var canBrowseMembers = false
+    var callUserId: Int64?
+    var canBeCalled = false
+    var supportsVideoCalls = false
+}
+
+private enum PrivateCallPhase: Equatable {
+    case requesting
+    case ringing
+    case connecting
+    case ready([String])
+    case ending
+    case ended
+
+    var title: String {
+        switch self {
+        case .requesting: "Starting call…"
+        case .ringing: "Ringing…"
+        case .connecting: "Connecting…"
+        case .ready: "Connected"
+        case .ending: "Ending call…"
+        case .ended: "Call ended"
+        }
+    }
 }
 
 // MARK: - ChatInfoView
@@ -70,6 +93,33 @@ struct ChatInfoView: View {
                 service: chatVM.service,
             ) { messageId in
                 openSharedMediaMessage(messageId)
+            }
+        }
+        .fullScreenCover(isPresented: $showsCall) {
+            PrivateCallView(
+                title: chat.chat.title,
+                photo: chat.chat.photo,
+                phase: callPhase,
+                isVideo: activeCallIsVideo,
+                onMuteChanged: { callMediaSession?.setMuted($0) },
+                onSpeakerChanged: { callMediaSession?.setSpeakerEnabled($0) },
+                onVideoChanged: {
+                    activeCallIsVideo = $0
+                    callMediaSession?.setVideoEnabled($0)
+                },
+                onSwitchCamera: { callMediaSession?.switchCamera() },
+                onHangUp: endCall,
+            )
+        }
+        .onReceive(chatVM.service.updatePublisher) { update in
+            switch update {
+            case .updateCall(let value):
+                receiveCallUpdate(value.call)
+            case .updateNewCallSignalingData(let value):
+                guard value.callId == activeCallId else { return }
+                callMediaSession?.addSignalingData(value.data)
+            default:
+                break
             }
         }
         .confirmationDialog("Mute \(chat.chat.title)", isPresented: $showMuteOptions) {
@@ -131,6 +181,13 @@ struct ChatInfoView: View {
     @State private var showDeleteConfirmation = false
     @State private var showMuteOptions = false
     @State private var showsSharedMedia = false
+    @State private var showsCall = false
+    @State private var activeCallId: Int?
+    @State private var activeCallUserId: Int64?
+    @State private var activeCallIsVideo = false
+    @State private var callPhase = PrivateCallPhase.requesting
+    @State private var callConnectedAt: Foundation.Date?
+    @State private var callMediaSession: PrivateCallMediaSession?
 
     private var chat: CustomChat { chatVM.customChat }
 
@@ -163,6 +220,26 @@ struct ChatInfoView: View {
                 .accessibilityElement(children: .combine)
 
                 if let info {
+                    if info.canBeCalled, let userId = info.callUserId {
+                        HStack(spacing: 12) {
+                            callButton(
+                                title: "Audio Call",
+                                systemImage: "phone.fill",
+                                isVideo: false,
+                                userId: userId,
+                            )
+
+                            if info.supportsVideoCalls {
+                                callButton(
+                                    title: "Video Call",
+                                    systemImage: "video.fill",
+                                    isVideo: true,
+                                    userId: userId,
+                                )
+                            }
+                        }
+                    }
+
                     HStack(spacing: 12) {
                         Button {
                             if isMuted(info) {
@@ -201,6 +278,143 @@ struct ChatInfoView: View {
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    private func callButton(title: String, systemImage: String, isVideo: Bool, userId: Int64) -> some View {
+        Button {
+            beginCall(userId: userId, isVideo: isVideo)
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                Text(title)
+                    .font(.caption)
+            }
+            .frame(minWidth: 110, minHeight: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.blue)
+        .disabled(showsCall)
+        .accessibilityLabel(title)
+    }
+
+    private func beginCall(userId: Int64, isVideo: Bool) {
+        callMediaSession?.stop()
+        callMediaSession = nil
+        activeCallId = nil
+        activeCallUserId = userId
+        activeCallIsVideo = isVideo
+        callConnectedAt = nil
+        callPhase = .requesting
+        showsCall = true
+        ServiceSoundManager.shared.startOutgoingCallTone()
+
+        Task {
+            do {
+                let result = try await chatVM.service.createCall(
+                    isVideo: isVideo,
+                    protocol: CallProtocol(
+                        libraryVersions: ["2.7.7", "5.0.0", "9.0.0", "12.0.0"],
+                        maxLayer: 92,
+                        minLayer: 65,
+                        udpP2p: true,
+                        udpReflector: true,
+                    ),
+                    userId: userId,
+                )
+                activeCallId = result.id
+            } catch {
+                showsCall = false
+                clearCallState()
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func receiveCallUpdate(_ call: Call) {
+        guard showsCall,
+              call.userId == activeCallUserId,
+              activeCallId == nil || call.id == activeCallId
+        else { return }
+
+        activeCallId = call.id
+        activeCallIsVideo = call.isVideo
+        switch call.state {
+        case .callStatePending:
+            callPhase = .ringing
+        case .callStateExchangingKeys:
+            ServiceSoundManager.shared.stopOutgoingCallTone()
+            callPhase = .connecting
+        case .callStateReady(let ready):
+            ServiceSoundManager.shared.stopOutgoingCallTone()
+            if callMediaSession == nil {
+                guard let mediaSession = PrivateCallMediaSession(call: call, ready: ready, service: chatVM.service) else {
+                    showsCall = false
+                    clearCallState()
+                    errorMessage = "The call media engine couldn't negotiate a compatible Telegram protocol."
+                    return
+                }
+                callMediaSession = mediaSession
+            }
+            if callConnectedAt == nil { callConnectedAt = Foundation.Date() }
+            callPhase = .ready(ready.emojis)
+        case .callStateHangingUp:
+            ServiceSoundManager.shared.stopOutgoingCallTone()
+            callPhase = .ending
+        case .callStateDiscarded:
+            ServiceSoundManager.shared.stopOutgoingCallTone()
+            callPhase = .ended
+            finishCallPresentation()
+        case .callStateError(let value):
+            ServiceSoundManager.shared.stopOutgoingCallTone()
+            showsCall = false
+            clearCallState()
+            errorMessage = value.error.message
+        }
+    }
+
+    private func endCall() {
+        ServiceSoundManager.shared.stopOutgoingCallTone()
+        guard let callId = activeCallId else {
+            showsCall = false
+            clearCallState()
+            return
+        }
+        callPhase = .ending
+        let duration = callConnectedAt.map { max(0, Int(Foundation.Date().timeIntervalSince($0))) } ?? 0
+        Task {
+            do {
+                _ = try await chatVM.service.discardCall(
+                    callId: callId,
+                    connectionId: 0,
+                    duration: duration,
+                    inviteLink: "",
+                    isDisconnected: false,
+                    isVideo: activeCallIsVideo,
+                )
+            } catch {
+                showsCall = false
+                clearCallState()
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func finishCallPresentation() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(650))
+            showsCall = false
+            clearCallState()
+        }
+    }
+
+    private func clearCallState() {
+        ServiceSoundManager.shared.stopOutgoingCallTone()
+        callMediaSession?.stop()
+        callMediaSession = nil
+        activeCallId = nil
+        activeCallUserId = nil
+        callConnectedAt = nil
+        callPhase = .requesting
     }
 
     private func sharedContentSection(_ info: ChatInfoData) -> some View {
@@ -555,6 +769,9 @@ struct ChatInfoView: View {
         info.commonGroupsUserId = full.groupInCommonCount > 0 ? userId : nil
         info.isBlocked = full.blockList == .blockListMain
         info.usesUnofficialApp = full.usesUnofficialApp
+        info.callUserId = userId
+        info.canBeCalled = full.canBeCalled
+        info.supportsVideoCalls = full.supportsVideoCalls
     }
 
     private func populateBasicGroupInfo(_ info: inout ChatInfoData, groupId: Int64) async {
@@ -636,6 +853,206 @@ struct ChatInfoView: View {
         dismiss()
         await Task.yield()
         RootVM.shared.navigate(to: .customChat(customChat, messageId: nil))
+    }
+}
+
+private struct PrivateCallView: View {
+    let title: String
+    let photo: ChatPhotoInfo?
+    let phase: PrivateCallPhase
+    let isVideo: Bool
+    let onMuteChanged: (Bool) -> Void
+    let onSpeakerChanged: (Bool) -> Void
+    let onVideoChanged: (Bool) -> Void
+    let onSwitchCamera: () -> Void
+    let onHangUp: () -> Void
+
+    @State private var isMuted = false
+    @State private var isSpeakerEnabled = true
+    @State private var isCameraEnabled: Bool
+
+    init(
+        title: String,
+        photo: ChatPhotoInfo?,
+        phase: PrivateCallPhase,
+        isVideo: Bool,
+        onMuteChanged: @escaping (Bool) -> Void,
+        onSpeakerChanged: @escaping (Bool) -> Void,
+        onVideoChanged: @escaping (Bool) -> Void,
+        onSwitchCamera: @escaping () -> Void,
+        onHangUp: @escaping () -> Void
+    ) {
+        self.title = title
+        self.photo = photo
+        self.phase = phase
+        self.isVideo = isVideo
+        self.onMuteChanged = onMuteChanged
+        self.onSpeakerChanged = onSpeakerChanged
+        self.onVideoChanged = onVideoChanged
+        self.onSwitchCamera = onSwitchCamera
+        self.onHangUp = onHangUp
+        _isCameraEnabled = State(initialValue: isVideo)
+    }
+
+    private var controlsEnabled: Bool {
+        if case .ready = phase { return true }
+        return false
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [.blue.opacity(0.85), .indigo, .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing,
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                Spacer()
+
+                ProfileImageView(
+                    photo: photo?.big,
+                    minithumbnail: photo?.minithumbnail,
+                    title: title,
+                    userId: Int64(title.hashValue),
+                    fontSize: 52,
+                )
+                .frame(width: 144, height: 144)
+                .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 3))
+                .shadow(radius: 24)
+
+                Text(title)
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+
+                Label(phase.title, systemImage: isVideo ? "video.fill" : "phone.fill")
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.9))
+
+                if case .ready(let emojis) = phase {
+                    if !emojis.isEmpty {
+                        Text(emojis.joined(separator: " "))
+                            .font(.title)
+                            .accessibilityLabel("Call encryption verification")
+                    }
+                }
+
+                Spacer()
+            }
+            .padding()
+        }
+        .interactiveDismissDisabled()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 14) {
+                cameraButton(size: 60)
+                muteButton(size: 60)
+
+                if isCameraEnabled {
+                    callControlButton(
+                        title: "Flip",
+                        systemImage: "camera.rotate.fill",
+                        isSelected: false,
+                        size: 60,
+                        action: onSwitchCamera
+                    )
+                    .disabled(!controlsEnabled)
+                } else {
+                    speakerButton(size: 60)
+                }
+
+                endCallButton(size: 60)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(.black.opacity(0.22))
+        }
+    }
+
+    private func callControlButton(
+        title: String,
+        systemImage: String,
+        isSelected: Bool,
+        size: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: size, height: size)
+                    .foregroundStyle(isSelected ? .black : .white)
+                    .background(isSelected ? .white : .white.opacity(0.18), in: Circle())
+                Text(title)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .frame(width: max(72, size))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private func cameraButton(size: CGFloat) -> some View {
+        callControlButton(
+            title: "Camera",
+            systemImage: isCameraEnabled ? "video.fill" : "video.slash.fill",
+            isSelected: isCameraEnabled,
+            size: size
+        ) {
+            isCameraEnabled.toggle()
+            onVideoChanged(isCameraEnabled)
+        }
+        .disabled(!controlsEnabled)
+    }
+
+    private func muteButton(size: CGFloat) -> some View {
+        callControlButton(
+            title: "Mute",
+            systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
+            isSelected: isMuted,
+            size: size
+        ) {
+            isMuted.toggle()
+            onMuteChanged(isMuted)
+        }
+        .disabled(!controlsEnabled)
+    }
+
+    private func speakerButton(size: CGFloat) -> some View {
+        callControlButton(
+            title: "Speaker",
+            systemImage: "speaker.wave.2.fill",
+            isSelected: isSpeakerEnabled,
+            size: size
+        ) {
+            isSpeakerEnabled.toggle()
+            onSpeakerChanged(isSpeakerEnabled)
+        }
+        .disabled(!controlsEnabled)
+    }
+
+    private func endCallButton(size: CGFloat) -> some View {
+        Button(action: onHangUp) {
+            VStack(spacing: 8) {
+                Image(systemName: "phone.down.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: size, height: size)
+                    .background(.red, in: Circle())
+                Text("End")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: max(72, size))
+        }
+        .buttonStyle(.plain)
+        .disabled(phase == .ending || phase == .ended)
+        .accessibilityLabel("End Call")
     }
 }
 

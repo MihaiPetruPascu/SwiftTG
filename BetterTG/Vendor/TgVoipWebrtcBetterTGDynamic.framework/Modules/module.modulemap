@@ -1,0 +1,5 @@
+framework module TgVoipWebrtcBetterTGDynamic {
+    umbrella header "TgVoipWebrtc.h"
+    export *
+    module * { export * }
+}

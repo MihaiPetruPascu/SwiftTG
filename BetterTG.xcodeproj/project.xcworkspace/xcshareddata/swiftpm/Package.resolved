@@ -1,60 +1,52 @@
 {
-  "originHash" : "d16500271aec1af85b3cc9094fe46d24e0efcefc6cfe74e75dffaf96d90a5788",
-  "pins" : [
-    {
-      "identity" : "ogg-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vector-im/ogg-swift.git",
-      "state" : {
-        "revision" : "9d82ed838404f10b607a1a1689f404563e9115c3",
-        "version" : "0.8.3"
+  "object": {
+    "pins": [
+      {
+        "package": "ogg-swift",
+        "repositoryURL": "https://github.com/vector-im/ogg-swift.git",
+        "state": {
+          "branch": null,
+          "revision": "9d82ed838404f10b607a1a1689f404563e9115c3",
+          "version": "0.8.3"
+        }
+      },
+      {
+        "package": "opus-swift",
+        "repositoryURL": "https://github.com/vector-im/opus-swift",
+        "state": {
+          "branch": null,
+          "revision": "11f1887767cbc87c4b64b789ee830b779cc744cb",
+          "version": "0.8.4"
+        }
+      },
+      {
+        "package": "swift-argument-parser",
+        "repositoryURL": "https://github.com/apple/swift-argument-parser.git",
+        "state": {
+          "branch": "main",
+          "revision": "1e77425a27b864b97501c78511382bd0a0500520",
+          "version": null
+        }
+      },
+      {
+        "package": "swift-ogg",
+        "repositoryURL": "https://github.com/element-hq/swift-ogg",
+        "state": {
+          "branch": null,
+          "revision": "a00a22b90f6230d2d3a75a18adef97a3603d9d28",
+          "version": "0.0.4"
+        }
+      },
+      {
+        "package": "TDLibFramework",
+        "repositoryURL": "https://github.com/Swiftgram/TDLibFramework",
+        "state": {
+          "branch": null,
+          "revision": "f5432dd1973449363aae7f8ce12f6de170eb7953",
+          "version": "1.8.65-a17f87c4"
+        }
       }
-    },
-    {
-      "identity" : "opus-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vector-im/opus-swift",
-      "state" : {
-        "revision" : "11f1887767cbc87c4b64b789ee830b779cc744cb",
-        "version" : "0.8.4"
-      }
-    },
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "1e77425a27b864b97501c78511382bd0a0500520"
-      }
-    },
-    {
-      "identity" : "swift-ogg",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/swift-ogg",
-      "state" : {
-        "revision" : "a00a22b90f6230d2d3a75a18adef97a3603d9d28",
-        "version" : "0.0.4"
-      }
-    },
-    {
-      "identity" : "tdlibframework",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Swiftgram/TDLibFramework",
-      "state" : {
-        "revision" : "f5432dd1973449363aae7f8ce12f6de170eb7953",
-        "version" : "1.8.65-a17f87c4"
-      }
-    },
-    {
-      "identity" : "tdlibkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Swiftgram/TDLibKit",
-      "state" : {
-        "branch" : "main",
-        "revision" : "d6e8bfce17f66454330099ba8550211c42f30364"
-      }
-    }
-  ],
-  "version" : 3
+    ]
+  },
+  "version": 1
 }

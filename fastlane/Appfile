@@ -1,7 +1,6 @@
-app_identifier("com.levochkaaa.BetterTG") # The bundle identifier of your app
-apple_id("levochkaaa@icloud.com") # Your Apple Developer Portal username
-team_id("7Z2WHPKU8W") # Developer Portal Team ID
-itc_team_id("127020327") # App Store Connect Team ID
+app_identifier("com.mihaipascu.BetterTG") # The bundle identifier of your app
+apple_id("mihai.pascu2@icloud.com") # Your Apple Developer Portal username
+team_id("949DJWKGYX") # Developer Portal Team ID
 
 # For more information about the Appfile, see:
 #     https://docs.fastlane.tools/advanced/#appfile
