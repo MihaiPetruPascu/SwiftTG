@@ -28,6 +28,7 @@ enum TelegramVoiceNoteSending {
                 result.append(level)
             }
         }
+        guard levels.contains(where: { $0 > 0 }) else { return Data() }
         return Data(pack(levels)).prefix(63)
     }
 
@@ -39,10 +40,12 @@ enum TelegramVoiceNoteSending {
     ) -> InputMessageContent {
         .inputMessageVoiceNote(.init(
             caption: caption,
-            duration: max(1, duration),
             selfDestructType: nil,
-            voiceNote: .inputFileLocal(.init(path: url.path())),
-            waveform: waveform,
+            voiceNote: InputVoiceNote(
+                duration: max(1, duration),
+                voiceNote: .inputFileLocal(.init(path: url.path())),
+                waveform: waveform,
+            ),
         ))
     }
 

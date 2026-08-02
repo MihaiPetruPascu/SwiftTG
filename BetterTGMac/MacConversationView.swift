@@ -2,6 +2,7 @@
 
 import AppKit
 import SwiftUI
+import TDLibKit
 
 // MARK: - MacConversationView
 
@@ -23,6 +24,9 @@ struct MacConversationView: View {
             if model.isConversationSearchActive {
                 conversationSearchField
                 Divider()
+            } else if model.currentPinnedMessage != nil {
+                pinnedMessageBanner
+                Divider()
             }
             messages
             Divider()
@@ -41,6 +45,22 @@ struct MacConversationView: View {
         .sheet(isPresented: $showsChatInfo) {
             MacChatInfoView(model: model, chat: chat)
         }
+        .sheet(isPresented: $showsPinnedMessages) {
+            MacPinnedMessagesView(model: model)
+        }
+        .sheet(isPresented: $showsPollComposer) {
+            TelegramPollComposerView { draft in
+                guard let chatId = model.openedChatId else { return }
+                try await TelegramPollSending.send(
+                    draft: draft,
+                    service: model.service,
+                    chatId: chatId,
+                    replyToMessageId: model.replyingToMessage?.id,
+                )
+                model.replyingToMessage = nil
+                model.saveCurrentDraft()
+            }
+        }
         .sheet(isPresented: Binding(
             get: { !model.selectedPhotoURLs.isEmpty || !model.selectedDocumentURLs.isEmpty },
             set: { isPresented in
@@ -57,6 +77,13 @@ struct MacConversationView: View {
         .onChange(of: model.conversationSearchQuery) {
             model.conversationSearchQueryDidChange()
         }
+        .task(id: chat.chatId) {
+            pollIsAvailable = false
+            pollIsAvailable = await TelegramPollSending.isAvailable(
+                service: model.service,
+                chatId: chat.chatId,
+            )
+        }
     }
 
     // MARK: Private
@@ -64,6 +91,9 @@ struct MacConversationView: View {
     @FocusState private var conversationSearchFocused
     @State private var isAtBottom = false
     @State private var showsChatInfo = false
+    @State private var showsPinnedMessages = false
+    @State private var showsPollComposer = false
+    @State private var pollIsAvailable = false
 
     private var shouldFollowLatestMessage: Bool {
         switch model.messages.change {
@@ -88,6 +118,11 @@ struct MacConversationView: View {
         model.editingMessage == nil ? model.messageText : model.editMessageText
     }
 
+    private var pinnedMessageSummary: String {
+        guard let message = model.currentPinnedMessage else { return "" }
+        return telegramQuotedMessageExcerpt(telegramMessageContentDescription(message))
+    }
+
     private var conversationSearchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -109,6 +144,36 @@ struct MacConversationView: View {
             .keyboardShortcut(.cancelAction)
         }
         .padding(10)
+        .background(.bar)
+    }
+
+    private var pinnedMessageBanner: some View {
+        HStack(spacing: 8) {
+            Button {
+                guard let message = model.currentPinnedMessage else { return }
+                model.activateChat(chat.chatId, messageId: message.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pinned Message")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    Text(pinnedMessageSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button("Show All Pinned Messages", systemImage: "chevron.right") {
+                showsPinnedMessages = true
+            }
+            .labelStyle(.iconOnly)
+            .frame(width: 36, height: 36)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(.bar)
     }
 
@@ -207,6 +272,13 @@ struct MacConversationView: View {
                 }
             }
 
+            if model.selectedPhotoURLs.isEmpty,
+               model.selectedDocumentURLs.isEmpty,
+               let preview = model.activeLinkPreviewComposer.preview
+            {
+                linkPreviewAccessory(preview)
+            }
+
             if model.isRecordingVoice {
                 HStack(spacing: 10) {
                     Image(systemName: "waveform")
@@ -228,27 +300,23 @@ struct MacConversationView: View {
                     Menu("Attach", systemImage: "paperclip") {
                         Button("Photos", systemImage: "photo") { model.choosePhotos() }
                         Button("Files", systemImage: "doc") { model.chooseDocuments() }
+                        if pollIsAvailable {
+                            Button("Poll", systemImage: "chart.bar") { showsPollComposer = true }
+                                .disabled(model.editingMessage != nil)
+                        }
                     }
                     .labelStyle(.iconOnly)
                     .help("Attach photos or files")
 
-                    if model.editingMessage == nil {
-                        MacComposerTextField(
-                            text: $model.messageText,
-                            accessibilityLabel: "Message",
-                            onPasteFiles: model.attachPastedFiles,
-                            onSubmit: model.submitComposer,
-                        )
-                        .frame(minHeight: 32, idealHeight: 48, maxHeight: 112)
-                    } else {
-                        MacComposerTextField(
-                            text: $model.editMessageText,
-                            accessibilityLabel: "Edit message",
-                            onPasteFiles: { _ in false },
-                            onSubmit: model.submitComposer,
-                        )
-                        .frame(minHeight: 32, idealHeight: 48, maxHeight: 112)
-                    }
+                    let isEditing = model.editingMessage != nil
+                    MacComposerTextField(
+                        text: isEditing ? $model.editMessageText : $model.messageText,
+                        accessibilityLabel: isEditing ? "Edit message" : "Message",
+                        contextID: model.editingMessage.map { AnyHashable($0.id) } ?? AnyHashable("composer"),
+                        onPasteFiles: isEditing ? { _ in false } : model.attachPastedFiles,
+                        onSubmit: model.submitComposer,
+                    )
+                    .frame(minHeight: 32, idealHeight: 48, maxHeight: 112)
 
                     if model.editingMessage == nil,
                        model.selectedDocumentURLs.isEmpty,
@@ -278,5 +346,29 @@ struct MacConversationView: View {
             }
         }
         .padding(12)
+    }
+
+    private func linkPreviewAccessory(_ preview: LinkPreview) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            MacLinkPreviewView(model: model, preview: preview)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Menu("Link Preview Options", systemImage: "ellipsis.circle") {
+                Button(model.activeLinkPreviewComposer.showsAboveText ? "Move Below Text" : "Move Above Text") {
+                    model.activeLinkPreviewComposer.togglePosition()
+                }
+                if preview.hasLargeMedia {
+                    Button(model.activeLinkPreviewComposer.showsLargeMedia ? "Use Small Media" : "Use Large Media") {
+                        model.activeLinkPreviewComposer.toggleMediaSize()
+                    }
+                }
+            }
+            .labelStyle(.iconOnly)
+
+            Button("Remove Link Preview", systemImage: "xmark") {
+                model.activeLinkPreviewComposer.dismiss()
+            }
+            .labelStyle(.iconOnly)
+        }
     }
 }

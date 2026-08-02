@@ -46,6 +46,9 @@ struct ChatView: View {
             if chatVM.isConversationSearchActive {
                 conversationSearchField
                 Divider()
+            } else if chatVM.currentPinnedMessage != nil {
+                pinnedMessageBanner
+                Divider()
             }
 
             ScrollViewReader { scrollViewProxy in
@@ -107,6 +110,7 @@ struct ChatView: View {
         }
         .background(.black)
         .ignoresSafeArea(.container, edges: .top)
+        .navigationTitle(chatVM.isConversationSearchActive ? "" : chatVM.customChat.chat.title)
         .navigationBarBackButtonHidden(true)
         .dropDestination(for: SelectedImage.self) { items, _ in
             nc.post(name: .localOnSelectedImagesDrop, object: Array(items.prefix(10)))
@@ -128,25 +132,27 @@ struct ChatView: View {
             chatVM.conversationSearchQueryDidChange()
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: dismiss.callAsFunction) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.backward")
-                        Text(backButtonTitle)
-                        if previousChatTitle == nil, unreadChatCount > 0 {
-                            Text("\(unreadChatCount)")
-                                .font(.caption2.bold())
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 5)
-                                .frame(minWidth: 18, minHeight: 18)
-                                .background(Color.accentColor, in: Capsule())
-                                .accessibilityHidden(true)
+            if !chatVM.isConversationSearchActive {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: dismiss.callAsFunction) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.backward")
+                            Text(backButtonTitle)
+                            if previousChatTitle == nil, unreadChatCount > 0 {
+                                Text("\(unreadChatCount)")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .frame(minWidth: 18, minHeight: 18)
+                                    .background(Color.accentColor, in: Capsule())
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
+                    .accessibilityLabel(backButtonAccessibilityLabel)
                 }
-                .accessibilityLabel(backButtonAccessibilityLabel)
+                ToolbarItem(placement: .principal) { principal }
             }
-            ToolbarItem(placement: .principal) { principal }
         }
         .alert(
             "Can't Open Destination",
@@ -169,6 +175,10 @@ struct ChatView: View {
         }
         .sheet(item: $chatVM.messagePendingForward) { message in
             ForwardChatPickerView(message: message, chatVM: chatVM)
+        }
+        .sheet(isPresented: $showsPinnedMessages) {
+            PinnedMessagesView()
+                .environment(chatVM)
         }
         .environment(chatVM)
     }
@@ -262,6 +272,7 @@ struct ChatView: View {
     @State private var positionedInitialMessages = false
     @State private var rootVM = RootVM.shared
     @State private var showsChatInfo = false
+    @State private var showsPinnedMessages = false
 
     private var unreadChatCount: Int {
         rootVM.allChats.lazy.filter(\.hasUnreadMessages).count
@@ -289,6 +300,11 @@ struct ChatView: View {
         UIApplication.safeAreaInsets.top + navigationBarHeight
     }
 
+    private var pinnedMessageSummary: String {
+        guard let message = chatVM.currentPinnedMessage else { return "" }
+        return telegramQuotedMessageExcerpt(telegramMessageContentDescription(message))
+    }
+
     private var conversationSearchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -313,6 +329,36 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var pinnedMessageBanner: some View {
+        HStack(spacing: 8) {
+            Button {
+                guard let message = chatVM.currentPinnedMessage else { return }
+                chatVM.navigateToMessage(id: message.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pinned Message")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    Text(pinnedMessageSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button("Show All Pinned Messages", systemImage: "chevron.right") {
+                showsPinnedMessages = true
+            }
+            .labelStyle(.iconOnly)
+            .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(.bar)
     }
 
@@ -453,7 +499,7 @@ struct ChatView: View {
 /// Keeps per-message observation local so a metadata update does not invalidate
 /// and rebuild the entire chat list.
 private struct ChatMessageListRows: View {
-    @Environment(ChatVM.self) private var chatVM
+    // MARK: Internal
 
     let customMessage: CustomMessage
     let previousMessage: CustomMessage?
@@ -531,6 +577,10 @@ private struct ChatMessageListRows: View {
         .onAppear { chatVM.loadMoreIfNeeded(distanceFromStart: distanceFromStart) }
     }
 
+    // MARK: Private
+
+    @Environment(ChatVM.self) private var chatVM
+
     private var startsNewDay: Bool {
         guard let previousMessage else { return true }
         let date = Date(timeIntervalSince1970: TimeInterval(customMessage.message.date))
@@ -565,8 +615,7 @@ private struct MessageDayHeader: View {
             Spacer()
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -592,8 +641,7 @@ private struct UnreadMessagesHeader: View {
                 .frame(height: 1)
         }
         .padding(.vertical, 6)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
