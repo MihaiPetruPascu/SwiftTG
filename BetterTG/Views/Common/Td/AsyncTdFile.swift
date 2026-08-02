@@ -1,10 +1,23 @@
 // AsyncTdFile.swift
 
-import Combine
 import SwiftUI
 import TDLibKit
 
 struct AsyncTdFile<Content: View, Placeholder: View>: View {
+    // MARK: Lifecycle
+
+    init(
+        id: Int,
+        service: any TelegramService = TDLib.shared.service,
+        @ViewBuilder content: @escaping (File) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder,
+    ) {
+        self.id = id
+        self.service = service
+        self.content = content
+        self.placeholder = placeholder
+    }
+
     // MARK: Internal
 
     let id: Int
@@ -14,7 +27,10 @@ struct AsyncTdFile<Content: View, Placeholder: View>: View {
     var body: some View {
         ZStack {
             Group {
-                if let file, file.local.isDownloadingCompleted {
+                if let file,
+                   file.local.isDownloadingCompleted,
+                   !file.local.path.isEmpty
+                {
                     content(file)
                 } else {
                     placeholder()
@@ -23,28 +39,27 @@ struct AsyncTdFile<Content: View, Placeholder: View>: View {
             .transition(.opacity)
         }
         .task(id: id) { await download(id) }
-        .onReceive(nc.publisher(for: .updateFile)) { updateFile in
-            guard updateFile.file.id == id else { return }
-            Task.main { withAnimation { file = updateFile.file } }
+        .onReceive(service.filePublisher(fileId: id)) { updatedFile in
+            withAnimation { file = updatedFile }
         }
     }
     
     // MARK: Private
 
     @State private var file: File?
+
+    private let service: any TelegramService
     
-    private func download(_ id: Int? = nil) async {
+    @MainActor private func download(_ id: Int? = nil) async {
         do {
-            let file = try await td.downloadFile(
+            let downloadedFile = try await service.downloadFile(
                 fileId: id ?? self.id,
                 limit: 0,
                 offset: 0,
                 priority: 1,
                 synchronous: false,
             )
-            withAnimation {
-                self.file = file
-            }
+            file = downloadedFile
         } catch {
             log("Error downloading file: \(error)")
         }

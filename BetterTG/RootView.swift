@@ -9,11 +9,19 @@ struct RootView: View {
         ZStack {
             if rootVM.loggedIn {
                 MainView()
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        TelegramAudioPlayerBar()
+                    }
             } else {
                 LoginView()
             }
         }
         .transition(.opacity)
+        .task(id: rootVM.loggedIn) {
+            guard rootVM.loggedIn else { return }
+            await PushNotificationsManager.shared.requestAuthorization()
+            await PermissionsManager.shared.requestPostLoginPermissions()
+        }
     }
 
     // MARK: Private

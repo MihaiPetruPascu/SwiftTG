@@ -7,9 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		DF55E2D2295B783F00A30C76 /* MobileVLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF55E2D1295B783F00A30C76 /* MobileVLCKit */; };
+		29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */ = {isa = PBXBuildFile; productRef = 69151C5FAB054AB894A93455 /* SwiftOGG */; };
+		A10000000000000000000001 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000000B /* TDLibKit */; };
+		B3000000000000000000000C /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
+		C40000000000000000000001 /* SwiftOGG in Frameworks */ = {isa = PBXBuildFile; productRef = 69151C5FAB054AB894A93455 /* SwiftOGG */; };
 		DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B3000000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF4B997628C3F3F50087C1B9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DF4B997D28C3F3F50087C1B9;
+			remoteInfo = BetterTG;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		DF63538429B68F180054F0A0 /* Embed Foundation Extensions */ = {
@@ -45,6 +58,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000002 /* BetterTGMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterTGMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000001 /* BetterTGTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BetterTGTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DF4B997E28C3F3F50087C1B9 /* BetterTG.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterTG.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -59,16 +74,37 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000003 /* BetterTGMac */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGMac; sourceTree = "<group>"; };
+		A20000000000000000000001 /* BetterTGShared */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGShared; sourceTree = "<group>"; };
+		A20000000000000000000002 /* BetterTG/Secret */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTG/Secret; sourceTree = "<group>"; };
+		B30000000000000000000002 /* BetterTGTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGTests; sourceTree = "<group>"; };
 		DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (DFD75B772D3DA0D8004E7CA6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTG; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* TDLibKit in Frameworks */,
+				C40000000000000000000001 /* SwiftOGG in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3000000000000000000000C /* TDLibKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DF4B997B28C3F3F50087C1B9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				DF55E2D2295B783F00A30C76 /* MobileVLCKit in Frameworks */,
 				DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */,
+				29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,6 +115,10 @@
 			isa = PBXGroup;
 			children = (
 				DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */,
+				A10000000000000000000003 /* BetterTGMac */,
+				A20000000000000000000001 /* BetterTGShared */,
+				A20000000000000000000002 /* BetterTG/Secret */,
+				B30000000000000000000002 /* BetterTGTests */,
 				DF4B997F28C3F3F50087C1B9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,6 +127,8 @@
 			isa = PBXGroup;
 			children = (
 				DF4B997E28C3F3F50087C1B9 /* BetterTG.app */,
+				A10000000000000000000002 /* BetterTGMac.app */,
+				B30000000000000000000001 /* BetterTGTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -94,6 +136,56 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A10000000000000000000005 /* BetterTGMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000A /* Build configuration list for PBXNativeTarget "BetterTGMac" */;
+			buildPhases = (
+				A10000000000000000000006 /* Sources */,
+				A10000000000000000000004 /* Frameworks */,
+				A10000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* BetterTGMac */,
+				A20000000000000000000001 /* BetterTGShared */,
+				A20000000000000000000002 /* BetterTG/Secret */,
+			);
+			name = BetterTGMac;
+			packageProductDependencies = (
+				A1000000000000000000000B /* TDLibKit */,
+				69151C5FAB054AB894A93455 /* SwiftOGG */,
+			);
+			productName = BetterTGMac;
+			productReference = A10000000000000000000002 /* BetterTGMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B30000000000000000000003 /* BetterTGTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B30000000000000000000009 /* Build configuration list for PBXNativeTarget "BetterTGTests" */;
+			buildPhases = (
+				B30000000000000000000004 /* Sources */,
+				B30000000000000000000005 /* Frameworks */,
+				B30000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B3000000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B30000000000000000000002 /* BetterTGTests */,
+			);
+			name = BetterTGTests;
+			packageProductDependencies = (
+				DF9C5CC0292698BC00ED1CA8 /* TDLibKit */,
+			);
+			productName = BetterTGTests;
+			productReference = B30000000000000000000001 /* BetterTGTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		DF4B997D28C3F3F50087C1B9 /* BetterTG */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DF4B998C28C3F3F60087C1B9 /* Build configuration list for PBXNativeTarget "BetterTG" */;
@@ -111,12 +203,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				A20000000000000000000001 /* BetterTGShared */,
 				DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */,
 			);
 			name = BetterTG;
 			packageProductDependencies = (
 				DF9C5CC0292698BC00ED1CA8 /* TDLibKit */,
-				DF55E2D1295B783F00A30C76 /* MobileVLCKit */,
+				69151C5FAB054AB894A93455 /* SwiftOGG */,
 			);
 			productName = BetterTG;
 			productReference = DF4B997E28C3F3F50087C1B9 /* BetterTG.app */;
@@ -130,8 +223,20 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1430;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					A10000000000000000000005 = {
+						CreatedOnToolsVersion = 26.0;
+						SystemCapabilities = {
+							com.apple.Push = {
+								enabled = 1;
+							};
+						};
+					};
+					B30000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = DF4B997D28C3F3F50087C1B9;
+					};
 					DF4B997D28C3F3F50087C1B9 = {
 						CreatedOnToolsVersion = 14.0;
 					};
@@ -149,18 +254,34 @@
 			packageReferences = (
 				DF820B6E28D787AD007DD293 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
 				DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */,
-				DF55E2D0295B783F00A30C76 /* XCRemoteSwiftPackageReference "MobileVLCKit" */,
+				A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */,
 			);
 			productRefGroup = DF4B997F28C3F3F50087C1B9 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				DF4B997D28C3F3F50087C1B9 /* BetterTG */,
+				A10000000000000000000005 /* BetterTGMac */,
+				B30000000000000000000003 /* BetterTGTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DF4B997C28C3F3F50087C1B9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -193,6 +314,20 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DF4B997A28C3F3F50087C1B9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -202,7 +337,109 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		B3000000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DF4B997D28C3F3F50087C1B9 /* BetterTG */;
+			targetProxy = B3000000000000000000000A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		A10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				CODE_SIGN_ENTITLEMENTS = BetterTGMac/BetterTGMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BetterTG uses the microphone to record and send voice messages.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = production;
+				CODE_SIGN_ENTITLEMENTS = BetterTGMac/BetterTGMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BetterTG uses the microphone to record and send voice messages.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B30000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTGTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BetterTG.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BetterTG";
+			};
+			name = Debug;
+		};
+		B30000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTGTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BetterTG.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BetterTG";
+			};
+			name = Release;
+		};
 		DF4B998A28C3F3F60087C1B9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -242,6 +479,7 @@
 				DEVELOPMENT_TEAM = 7Z2WHPKU8W;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -307,6 +545,7 @@
 				DEVELOPMENT_TEAM = 7Z2WHPKU8W;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -330,19 +569,22 @@
 		DF4B998D28C3F3F60087C1B9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_ENTITLEMENTS = BetterTG/BetterTG.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We would like to access your Microphone to let you send Voice messages in chats.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
@@ -361,7 +603,7 @@
 				);
 				MARKETING_VERSION = 4;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = com.levochkaaa.BetterTG;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -379,19 +621,22 @@
 		DF4B998E28C3F3F60087C1B9 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_ENTITLEMENTS = BetterTG/BetterTG.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We would like to access your Microphone to let you send Voice messages in chats.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
@@ -410,7 +655,7 @@
 				);
 				MARKETING_VERSION = 4;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = com.levochkaaa.BetterTG;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -427,6 +672,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A1000000000000000000000A /* Build configuration list for PBXNativeTarget "BetterTGMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000008 /* Debug */,
+				A10000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B30000000000000000000009 /* Build configuration list for PBXNativeTarget "BetterTGTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B30000000000000000000007 /* Debug */,
+				B30000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		DF4B997928C3F3F50087C1B9 /* Build configuration list for PBXProject "BetterTG" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -448,12 +711,12 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		DF55E2D0295B783F00A30C76 /* XCRemoteSwiftPackageReference "MobileVLCKit" */ = {
+		A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/levochkaa/MobileVLCKit";
+			repositoryURL = "https://github.com/element-hq/swift-ogg";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.4;
 			};
 		};
 		DF820B6E28D787AD007DD293 /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
@@ -475,10 +738,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		DF55E2D1295B783F00A30C76 /* MobileVLCKit */ = {
+		69151C5FAB054AB894A93455 /* SwiftOGG */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = DF55E2D0295B783F00A30C76 /* XCRemoteSwiftPackageReference "MobileVLCKit" */;
-			productName = MobileVLCKit;
+			package = A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */;
+			productName = SwiftOGG;
+		};
+		A1000000000000000000000B /* TDLibKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */;
+			productName = TDLibKit;
 		};
 		DF9C5CC0292698BC00ED1CA8 /* TDLibKit */ = {
 			isa = XCSwiftPackageProductDependency;

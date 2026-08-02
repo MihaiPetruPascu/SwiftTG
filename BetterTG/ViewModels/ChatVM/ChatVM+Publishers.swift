@@ -6,178 +6,388 @@ import TDLibKit
 
 extension ChatVM {
     func setPublishers() {
-        nc.publisher(&cancellables, for: .localScrollToLastOnFocus) { [weak self] _ in
-            guard let self, scrollOnFocus else { return }
+        nc.publisher(&cancellables, for: .localScrollToLastIfNeeded) { [weak self] _ in
+            guard let self, isAtBottom else { return }
             Task.main { self.scrollToLast() }
         }
-        nc.publisher(&cancellables, for: .updateChatReadInbox) { [weak self] updateChatReadInbox in
-            guard let self, updateChatReadInbox.chatId == customChat.chat.id else { return }
-            Task.main { self.customChat.unreadCount = updateChatReadInbox.unreadCount }
+        service.messagePublisher(chatId: customChat.chat.id)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                Task { @MainActor in self?.handle(snapshot) }
+            }
+            .store(in: &cancellables)
+        let chatType = customChat.type
+        service.updatePublisher
+            .filter { isConversationStatusUpdate($0, for: chatType) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] update in
+                Task { @MainActor in self?.updateConversationStatus(update) }
+            }
+            .store(in: &cancellables)
+    }
+
+    @MainActor private func updateConversationStatus(_ update: Update) {
+        let status: String? =
+            switch (customChat.type, update) {
+            case (.group(let group), .updateBasicGroup(let value)) where group.id == value.basicGroup.id:
+                conversationGroupStatus(memberCount: value.basicGroup.memberCount)
+            case (.group(let group), .updateBasicGroupFullInfo(let value)) where group.id == value.basicGroupId:
+                conversationGroupStatus(memberCount: value.basicGroupFullInfo.members.count)
+            case (.supergroup(let group), .updateSupergroup(let value)) where group.id == value.supergroup.id:
+                conversationSupergroupStatus(
+                    isChannel: value.supergroup.isChannel,
+                    memberCount: value.supergroup.memberCount,
+                )
+            case (.supergroup(let group), .updateSupergroupFullInfo(let value))
+                where group.id == value.supergroupId:
+                conversationSupergroupStatus(
+                    isChannel: group.isChannel,
+                    memberCount: value.supergroupFullInfo.memberCount,
+                )
+            default:
+                nil
+            }
+
+        guard let status else { return }
+        withAnimation { onlineStatus = status }
+    }
+
+    @MainActor private func handle(_ snapshot: TelegramMessageSnapshot) {
+        if let appliedMessageSnapshotVersion, snapshot.version <= appliedMessageSnapshotVersion {
+            return
         }
-        nc.publisher(&cancellables, for: .updateNewMessage) { [weak self] updateNewMessage in
-            guard let self, updateNewMessage.message.chatId == customChat.chat.id else { return }
-            self.updateNewMessage(updateNewMessage)
+        appliedMessageSnapshotVersion = snapshot.version
+        latestMessageSnapshot = snapshot
+        if loadedMessageIds.isEmpty, initialMessageId == nil, snapshot.hasMergedHistory {
+            loadedMessageIds.formUnion(snapshot.orderedMessageIds.suffix(30))
         }
-        nc.publisher(&cancellables, for: .updateDeleteMessages) { [weak self] updateDeleteMessages in
-            guard let self, updateDeleteMessages.chatId == customChat.chat.id else { return }
-            self.updateDeleteMessages(updateDeleteMessages)
+        renderStore.completeRefreshesIfMerged(messages: snapshot.messages)
+
+        guard let change = snapshot.change else {
+            reconcileMessages(with: snapshot)
+            return
         }
-        nc.publisher(&cancellables, for: .updateMessageEdited) { [weak self] updateMessageEdited in
-            guard let self, updateMessageEdited.chatId == customChat.chat.id else { return }
-            self.updateMessageEdited(updateMessageEdited)
-        }
-        nc.publisher(&cancellables, for: .updateMessageSendSucceeded) { [weak self] updateMessageSendSucceeded in
-            guard let self, updateMessageSendSucceeded.message.chatId == customChat.chat.id else { return }
-            self.updateMessageSendSucceeded(updateMessageSendSucceeded)
-        }
-        nc.publisher(&cancellables, for: .updateUserStatus) { [weak self] updateUserStatus in
-            guard let self, updateUserStatus.userId == customChat.chat.id else { return }
-            self.updateUserStatus(updateUserStatus)
-        }
-        nc.publisher(&cancellables, for: .updateChatAction) { [weak self] updateChatAction in
-            guard let self, updateChatAction.chatId == customChat.chat.id else { return }
-            self.updateChatAction(updateChatAction)
+
+        switch change {
+        case .readInbox(let value):
+            customChat.unreadCount = value.unreadCount
+            reconcileMessages(with: snapshot)
+        case .readOutbox(let value):
+            customChat.lastReadOutboxMessageId = value.lastReadOutboxMessageId
+            reconcileMessages(with: snapshot)
+        case .newMessage(let value):
+            if !value.message.isOutgoing {
+                ServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: customChat.isMuted)
+            }
+            loadedMessageIds.insert(value.message.id)
+            pendingScrollMessageIds.insert(value.message.id)
+            reconcileMessages(with: snapshot)
+        case .deleteMessages:
+            reconcileMessages(with: snapshot)
+        case .messageContentChanged(let value):
+            invalidateMessageAndReplies(messageId: value.messageId, version: snapshot.version)
+            refreshMessage(messageId: value.messageId, version: snapshot.version)
+        case .messageEdited(let value):
+            invalidateMessageAndReplies(messageId: value.messageId, version: snapshot.version)
+            refreshMessage(messageId: value.messageId, version: snapshot.version)
+        case .messageInteractionInfo(let value):
+            renderStore.invalidate(messageId: value.messageId, version: snapshot.version)
+            refreshMessage(messageId: value.messageId, version: snapshot.version)
+        case .messagePinChanged(let value):
+            renderStore.invalidate(messageId: value.messageId, version: snapshot.version)
+            refreshMessage(messageId: value.messageId, version: snapshot.version)
+        case .messageSendSucceeded(let value):
+            if value.message.isOutgoing {
+                ServiceSoundManager.shared.playMessageDelivered()
+            }
+            loadedMessageIds.insert(value.message.id)
+            // A successful send replaces TDLib's temporary message id with a permanent one.
+            // Never mutate the id of the CustomMessage already mounted in SwiftUI's ForEach:
+            // its id is the row identity, and changing it behind Observation's back leaves the
+            // accessibility element attached to the temporary row. Render a new model instead.
+            renderedMessages.removeValue(forKey: value.oldMessageId)
+            renderStore.invalidate(messageId: value.message.id, version: snapshot.version)
+            if pendingScrollMessageIds.remove(value.oldMessageId) != nil {
+                pendingScrollMessageIds.insert(value.message.id)
+            }
+            reconcileMessages(with: snapshot)
+        case .userStatus(let value):
+            withAnimation { onlineStatus = getOnlineStatus(from: value.status) }
+        case .chatAction(let value):
+            updateChatAction(value)
+        case .historyMerged:
+            reconcileMessages(with: snapshot)
         }
     }
-    
-    func updateUserStatus(_ updateUserStatus: UpdateUserStatus) {
-        let onlineStatus = getOnlineStatus(from: updateUserStatus.status)
-        Task.main { withAnimation { self.onlineStatus = onlineStatus } }
+
+    @MainActor private func reconcileMessages(with snapshot: TelegramMessageSnapshot) {
+        // The shared store retains a chat's entire history for the app's lifetime; only
+        // reconcile/render the bounded window this ChatVM has actually paged in or received live,
+        // otherwise reopening a chat scrolled deep into earlier would re-render its whole backlog.
+        let currentIds = Set(snapshot.orderedMessageIds).intersection(loadedMessageIds)
+        renderedMessages = renderedMessages.filter { currentIds.contains($0.key) }
+        provisionalMessageIds.formIntersection(currentIds)
+        let toRender = renderStore.reconcile(currentIds: currentIds, messages: snapshot.messages)
+
+        for (message, invalidationVersion) in toRender {
+            renderMessage(message, invalidationVersion: invalidationVersion)
+        }
+
+        rebuildDisplayedMessages(from: snapshot)
+        updateInitialLoadingState(from: snapshot)
     }
-    
-    func updateChatAction(_ updateChatAction: UpdateChatAction) {
-        guard case .messageSenderUser(let messageSenderUser) = updateChatAction.senderId,
-              messageSenderUser.userId == customChat.chat.id
-        else { return }
-        let actionStatus =
-            switch updateChatAction.action {
+
+    @MainActor private func renderMessage(_ message: Message, invalidationVersion: UInt64) {
+        let generation = renderStore.beginRendering(message, invalidationVersion: invalidationVersion)
+
+        if renderedMessages[message.id] == nil {
+            renderedMessages[message.id] = initialCustomMessage(from: message)
+            provisionalMessageIds.insert(message.id)
+        }
+
+        Task.background {
+            await self.messageRenderLimiter.acquire()
+            let customMessage = await self.getCustomMessage(from: message)
+            await self.messageRenderLimiter.release()
+            await main {
+                guard self.renderStore.isRenderStillCurrent(
+                    messageId: message.id,
+                    generation: generation,
+                    invalidationVersion: invalidationVersion,
+                    currentMessage: self.latestMessageSnapshot?.messages[message.id],
+                )
+                else { return }
+
+                self.renderStore.commitRender(
+                    messageId: message.id,
+                    message: message,
+                    invalidationVersion: invalidationVersion,
+                )
+                self.renderedMessages[message.id] = customMessage
+                let replacedProvisionalMessage = self.provisionalMessageIds.remove(message.id) != nil
+                if self.replyMessage?.message.id == message.id {
+                    self.replyMessage = customMessage
+                }
+                if !replacedProvisionalMessage || self.provisionalMessageIds.isEmpty {
+                    self.scheduleDisplayedMessagesRebuild()
+                }
+            }
+        }
+    }
+
+    private func initialCustomMessage(from message: Message) -> CustomMessage {
+        let customMessage = CustomMessage(message: message, properties: .default)
+        if message.mediaAlbumId != 0 {
+            customMessage.album.append(message)
+        }
+        customMessage.formattedText =
+            switch message.content {
+            case .messageText(let messageText):
+                messageText.text
+            case .messagePhoto, .messageVideo, .messageDocument, .messageVoiceNote, .messageAudio:
+                telegramMessageFormattedText(message)
+            case .messageUnsupported:
+                FormattedText(entities: [], text: "TDLib not supported")
+            default:
+                nil
+            }
+        return customMessage
+    }
+
+    @MainActor private func scheduleDisplayedMessagesRebuild() {
+        guard displayedMessagesRebuildTask == nil else { return }
+        displayedMessagesRebuildTask = Task { @MainActor [weak self] in
+            try? await Task<Never, Never>.sleep(for: .milliseconds(40))
+            guard let self, !Task.isCancelled else { return }
+            displayedMessagesRebuildTask = nil
+            guard let snapshot = latestMessageSnapshot else { return }
+            rebuildDisplayedMessages(from: snapshot)
+            updateInitialLoadingState(from: snapshot)
+        }
+    }
+
+    @MainActor private func rebuildDisplayedMessages(from snapshot: TelegramMessageSnapshot) {
+        var displayedMessages = [CustomMessage]()
+        var processedAlbums = Set<TdInt64>()
+        var albumMessageIds = [TdInt64: [Int64]]()
+
+        for messageId in snapshot.orderedMessageIds {
+            guard let albumId = snapshot.messages[messageId]?.mediaAlbumId, albumId != 0 else { continue }
+            albumMessageIds[albumId, default: []].append(messageId)
+        }
+
+        for messageId in snapshot.orderedMessageIds {
+            guard let rawMessage = snapshot.messages[messageId] else { continue }
+            if rawMessage.mediaAlbumId == 0 {
+                if let rendered = renderedMessages[messageId] {
+                    if !rendered.album.isEmpty {
+                        rendered.album = []
+                    }
+                    displayedMessages.append(rendered)
+                }
+                continue
+            }
+
+            let albumId = rawMessage.mediaAlbumId
+            guard processedAlbums.insert(albumId).inserted else { continue }
+            guard let messageIds = albumMessageIds[albumId],
+                  messageIds.allSatisfy({ renderedMessages[$0] != nil }),
+                  let representativeId = messageIds.first,
+                  let representative = renderedMessages[representativeId]
+            else { continue }
+            let album = messageIds.compactMap { snapshot.messages[$0] }
+            if representative.album.map(\.id) != album.map(\.id) {
+                representative.album = album
+            }
+            displayedMessages.append(representative)
+        }
+
+        let currentIds = messages.map(\.id)
+        let displayedIds = displayedMessages.map(\.id)
+        if currentIds != displayedIds {
+            let currentIdSet = Set(currentIds)
+            let displayedIdSet = Set(displayedIds)
+            let addedIds = displayedIdSet.subtracting(currentIdSet)
+            let removedCount = currentIdSet.subtracting(displayedIdSet).count
+            let isSmallChange = addedIds.count + removedCount <= 2
+            let additionsAreAtBottom = addedIds.isEmpty || addedIds.allSatisfy { $0 == displayedIds.last }
+            if initialMessagesLoaded, isSmallChange, additionsAreAtBottom {
+                withAnimation { messages = displayedMessages }
+            } else {
+                messages = displayedMessages
+            }
+        } else {
+            for index in messages.indices where messages[index] !== displayedMessages[index] {
+                if initialMessagesLoaded {
+                    withAnimation { messages[index] = displayedMessages[index] }
+                } else {
+                    messages[index] = displayedMessages[index]
+                }
+            }
+        }
+
+        let updatedAudioPlaylist = displayedMessages.compactMap { $0.messageAudio?.audio }
+        if audioPlaylist.map(\.audio.id) != updatedAudioPlaylist.map(\.audio.id) {
+            audioPlaylist = updatedAudioPlaylist
+        }
+
+        let displayedMessageIds = Set(messages.flatMap { message in
+            [message.id] + message.album.map(\.id)
+        })
+        let readyToScroll = pendingScrollMessageIds.intersection(displayedMessageIds)
+        if !readyToScroll.isEmpty {
+            pendingScrollMessageIds.subtract(readyToScroll)
+            nc.post(name: .localScrollToLastIfNeeded)
+        }
+
+        if let targetMessageId = pendingNavigationMessageId,
+           messages.contains(where: { $0.id == targetMessageId })
+        {
+            pendingNavigationMessageId = nil
+            if pendingNavigationMovesAccessibilityFocus {
+                accessibilityFocusRequestMessageId = targetMessageId
+            } else {
+                scrollRequestMessageId = targetMessageId
+            }
+            pendingNavigationMovesAccessibilityFocus = false
+        }
+    }
+
+    @MainActor private func updateInitialLoadingState(from snapshot: TelegramMessageSnapshot) {
+        guard !initialMessagesLoaded, snapshot.hasMergedHistory else { return }
+        let relevantIds = Set(snapshot.orderedMessageIds).intersection(loadedMessageIds)
+        let allMessagesRendered = relevantIds.allSatisfy { renderedMessages[$0] != nil }
+        guard allMessagesRendered else { return }
+        withAnimation { initialMessagesLoaded = true }
+    }
+
+    @MainActor private func invalidateMessageAndReplies(messageId: Int64, version: UInt64) {
+        renderStore.invalidate(messageId: messageId, version: version)
+        for (renderedId, renderedMessage) in renderedMessages
+            where renderedMessage.replyToMessage?.id == messageId
+        {
+            renderStore.invalidate(messageId: renderedId, version: version)
+        }
+    }
+
+    @MainActor private func refreshMessage(messageId: Int64, version: UInt64) {
+        renderStore.beginRefresh(messageId: messageId, version: version)
+        let chatId = customChat.chat.id
+        Task.background {
+            let refreshed = try? await self.service.getMessage(chatId: chatId, messageId: messageId)
+            await main {
+                guard self.renderStore.isRefreshStillCurrent(messageId: messageId, version: version) else { return }
+                guard let refreshed else {
+                    self.renderStore.cancelRefresh(messageId: messageId)
+                    return
+                }
+                self.renderStore.stageRefreshedMessage(refreshed, for: messageId)
+                self.service.mergeMessages(chatId: chatId, messages: [refreshed])
+            }
+        }
+    }
+
+    @MainActor private func updateChatAction(_ update: UpdateChatAction) {
+        let status =
+            switch update.action {
             case .chatActionTyping: "typing..."
             case .chatActionRecordingVideo: "recording video..."
-            case .chatActionUploadingVideo: /* (let chatActionUploadingVideo) */ "uploading video..."
+            case .chatActionUploadingVideo: "uploading video..."
             case .chatActionRecordingVoiceNote: "recording voice note..."
-            case .chatActionUploadingVoiceNote: /* (let chatActionUploadingVoiceNote) */ "uploading voice note..."
-            case .chatActionUploadingPhoto: /* (let chatActionUploadingPhoto) */ "uploading photo..."
-            case .chatActionUploadingDocument: /* (let chatActionUploadingDocument) */ "uploading voice document..."
+            case .chatActionUploadingVoiceNote: "uploading voice note..."
+            case .chatActionUploadingPhoto: "uploading photo..."
+            case .chatActionUploadingDocument: "uploading voice document..."
             case .chatActionChoosingSticker: "choosing sticker..."
             case .chatActionChoosingLocation: "choosing location..."
             case .chatActionChoosingContact: "choosing contact..."
             case .chatActionStartPlayingGame: "playing game..."
             case .chatActionRecordingVideoNote: "recording video note..."
-            case .chatActionUploadingVideoNote: /* (let chatActionUploadingVideoNote) */ "uploading video note..."
+            case .chatActionUploadingVideoNote: "uploading video note..."
             case .chatActionWatchingAnimations(let watching): "watching animations...\(watching.emoji)"
             case .chatActionCancel: ""
             }
-        Task.main {
-            withAnimation {
-                self.actionStatus = actionStatus
-            }
+        withAnimation { actionStatus = status }
+    }
+}
+
+private func isConversationStatusUpdate(_ update: Update, for chatType: CustomChat.CustomChatType) -> Bool {
+    switch (chatType, update) {
+    case (.group(let group), .updateBasicGroup(let value)):
+        group.id == value.basicGroup.id
+    case (.group(let group), .updateBasicGroupFullInfo(let value)):
+        group.id == value.basicGroupId
+    case (.supergroup(let group), .updateSupergroup(let value)):
+        group.id == value.supergroup.id
+    case (.supergroup(let group), .updateSupergroupFullInfo(let value)):
+        group.id == value.supergroupId
+    default:
+        false
+    }
+}
+
+actor MessageRenderLimiter {
+    private var availablePermits: Int
+    private var waiters = [CheckedContinuation<Void, Never>]()
+
+    init(limit: Int) {
+        availablePermits = max(1, limit)
+    }
+
+    func acquire() async {
+        if availablePermits > 0 {
+            availablePermits -= 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
         }
     }
-    
-    func updateMessageSendSucceeded(_ updateMessageSendSucceeded: UpdateMessageSendSucceeded) {
-        let message = updateMessageSendSucceeded.message
-        let oldMessageId = updateMessageSendSucceeded.oldMessageId
-        
-        if message.mediaAlbumId == 0 {
-            guard let index = messages.firstIndex(where: { $0.message.id == oldMessageId }) else { return }
-            Task.background {
-                let customMessage = await self.getCustomMessage(from: message)
-                await main {
-                    withAnimation {
-                        self.messages[index] = customMessage
-                    }
-                }
-            }
+
+    func release() {
+        if waiters.isEmpty {
+            availablePermits += 1
         } else {
-            for (outerIndex, outerMessage) in messages.enumerated() {
-                for (innerIndex, innerMessage) in outerMessage.album.enumerated() {
-                    guard innerMessage.id == oldMessageId else { continue }
-                    withAnimation {
-                        messages[outerIndex].album[innerIndex] = message
-                    }
-                    nc.post(name: .localScrollToLastOnFocus)
-                }
-            }
-        }
-    }
-    
-    func updateDeleteMessages(_ updateDeleteMessages: UpdateDeleteMessages) {
-        if updateDeleteMessages.fromCache || !updateDeleteMessages.isPermanent { return }
-        
-        Task.main(delay: 0.5) {
-            withAnimation {
-                self.messages.removeAll { customMessage in
-                    updateDeleteMessages.messageIds.contains(customMessage.message.id)
-                }
-            }
-        }
-    }
-    
-    func updateNewMessage(_ updateNewMessage: UpdateNewMessage) {
-        let message = updateNewMessage.message
-        Task.background {
-            let customMessage = await self.getCustomMessage(from: message)
-            if message.mediaAlbumId == 0 {
-                await main {
-                    withAnimation {
-                        self.messages.add(customMessage)
-                    }
-                }
-            } else {
-                if let index = self.messages.firstIndex(where: {
-                    $0.message.mediaAlbumId == message.mediaAlbumId
-                }) {
-                    await main {
-                        withAnimation {
-                            self.messages[index].album.append(customMessage.message)
-                        }
-                    }
-                } else {
-                    await main {
-                        withAnimation {
-                            self.messages.add(customMessage)
-                        }
-                    }
-                }
-            }
-            nc.post(name: .localScrollToLastOnFocus)
-        }
-    }
-    
-    func updateMessageEdited(_ updateMessageEdited: UpdateMessageEdited) {
-        if let index = messages.firstIndex(where: { $0.message.id == updateMessageEdited.messageId }) {
-            Task.background {
-                guard let customMessage = await self.getCustomMessage(fromId: updateMessageEdited.messageId)
-                else { return }
-                
-                await main {
-                    withAnimation {
-                        self.messages[index] = customMessage
-                        
-                        if updateMessageEdited.messageId == self.replyMessage?.message.id {
-                            self.replyMessage = customMessage
-                        }
-                    }
-                }
-            }
-        }
-        
-        let indices = messages.enumerated().compactMap { index, customMessage in
-            customMessage.replyToMessage?.id == updateMessageEdited.messageId ? index : nil
-        }
-        guard !indices.isEmpty else { return }
-        Task.background {
-            let reply = try? await td.getMessage(
-                chatId: self.customChat.chat.id,
-                messageId: updateMessageEdited.messageId,
-            )
-            await main {
-                for index in indices {
-                    withAnimation {
-                        self.messages[index].replyToMessage = reply
-                    }
-                }
-            }
+            waiters.removeFirst().resume()
         }
     }
 }

@@ -4,84 +4,124 @@ import SwiftUI
 import TDLibKit
 
 extension MessageView {
-    var contextMenuActions: [ContextMenuAction] {
-        var actions = [ContextMenuAction]()
-        actions.append(.button(title: "Reply", systemImage: "arrowshape.turn.up.left") {
-            if chatVM.replyMessage != nil {
-                withAnimation {
-                    chatVM.replyMessage = nil
-                }
-                Task.main(delay: 0.4) {
-                    withAnimation {
-                        chatVM.replyMessage = customMessage
-                    }
-                }
-            } else {
-                withAnimation {
-                    chatVM.replyMessage = customMessage
-                }
-            }
-        })
+    /// SwiftUI announces actions in reverse declaration order, so declare them from last to first.
+    @ViewBuilder var messageAccessibilityActions: some View {
+        if customMessage.properties.canBeDeletedOnlyForSelf
+            || customMessage.properties.canBeDeletedForAllUsers
+        {
+            Button("Delete") { showDeleteOptions = true }
+        }
+        if customMessage.properties.canBePinned {
+            Button(customMessage.message.isPinned ? "Unpin" : "Pin", action: togglePinnedMessage)
+        }
         if customMessage.properties.canBeEdited {
-            actions.append(.button(title: "Edit", systemImage: "square.and.pencil") {
-                if chatVM.editCustomMessage != nil {
-                    withAnimation {
-                        chatVM.editCustomMessage = nil
-                    }
-                    Task.main(delay: 0.4) {
-                        withAnimation {
-                            chatVM.editCustomMessage = customMessage
-                        }
-                    }
-                } else {
-                    withAnimation {
-                        chatVM.editCustomMessage = customMessage
+            Button("Edit", action: edit)
+        }
+        if customMessage.properties.canBeCopied,
+           telegramMessageFormattedText(customMessage.message) != nil
+        {
+            Button("Copy", action: copyMessageText)
+        }
+        if !reactionChoices.isEmpty {
+            Button("React") { showReactionOptions = true }
+        }
+        if customMessage.properties.canBeForwarded {
+            Button("Forward", action: forward)
+        }
+        if customMessage.properties.canBeReplied {
+            Button("Reply", action: reply)
+        }
+    }
+
+    @ViewBuilder var messageContextMenu: some View {
+        if customMessage.properties.canBeReplied {
+            Button(action: reply) {
+                Label("Reply", systemImage: "arrowshape.turn.up.left")
+            }
+        }
+        if customMessage.properties.canBeForwarded {
+            Button(action: forward) {
+                Label("Forward", systemImage: "arrowshape.turn.up.right")
+            }
+        }
+        if !reactionChoices.isEmpty {
+            Menu {
+                ForEach(reactionChoices, id: \.self) { reaction in
+                    Button {
+                        toggleReaction(reaction)
+                    } label: {
+                        Label(
+                            telegramReactionActionTitle(reaction, existing: messageReactions),
+                            systemImage: "face.smiling",
+                        )
                     }
                 }
-            })
+            } label: {
+                Label("React", systemImage: "face.smiling")
+            }
         }
-        if let formattedText = getFormattedText(from: customMessage.message.content) {
-            actions.append(.button(title: "Copy", systemImage: "rectangle.portrait.on.rectangle.portrait") {
-                UIPasteboard.setFormattedText(formattedText)
-            })
+        if customMessage.properties.canBeCopied,
+           telegramMessageFormattedText(customMessage.message) != nil
+        {
+            Button(action: copyMessageText) {
+                Label("Copy", systemImage: "rectangle.portrait.on.rectangle.portrait")
+            }
         }
-        actions.append(.divider)
-        if customMessage.properties.canBeDeletedOnlyForSelf, !customMessage.properties.canBeDeletedForAllUsers {
-            actions.append(.button(title: "Delete", systemImage: "trash", attributes: .destructive) {
-                chatVM.deleteMessage(id: customMessage.message.id, deleteForBoth: false)
-            })
+        if customMessage.properties.canBeEdited {
+            Button(action: edit) {
+                Label("Edit", systemImage: "square.and.pencil")
+            }
         }
-        if customMessage.properties.canBeDeletedForAllUsers, !customMessage.properties.canBeDeletedOnlyForSelf {
-            actions.append(.button(title: "Delete for both", systemImage: "trash.fill", attributes: .destructive) {
-                chatVM.deleteMessage(id: customMessage.message.id, deleteForBoth: true)
-            })
+        if customMessage.properties.canBePinned {
+            Button(action: togglePinnedMessage) {
+                Label(
+                    customMessage.message.isPinned ? "Unpin" : "Pin",
+                    systemImage: customMessage.message.isPinned ? "pin.slash" : "pin",
+                )
+            }
         }
-        if customMessage.properties.canBeDeletedOnlyForSelf, customMessage.properties.canBeDeletedForAllUsers {
-            actions.append(.menu(title: "Delete", children: [
-                .button(title: "Delete only for me", systemImage: "trash", attributes: .destructive) {
-                    chatVM.deleteMessage(id: customMessage.message.id, deleteForBoth: false)
-                },
-                .button(title: "Delete for both", systemImage: "trash.fill", attributes: .destructive) {
-                    chatVM.deleteMessage(id: customMessage.message.id, deleteForBoth: true)
-                },
-            ]))
+        if customMessage.properties.canBeDeletedOnlyForSelf
+            || customMessage.properties.canBeDeletedForAllUsers
+        {
+            Divider()
+            Button(role: .destructive) {
+                showDeleteOptions = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
-        return actions
     }
-    
-    func getFormattedText(from content: MessageContent) -> FormattedText? {
-        switch content {
-        case .messageText(let messageText):
-            guard !messageText.text.text.isEmpty else { return nil }
-            return messageText.text
-        case .messagePhoto(let messagePhoto):
-            guard !messagePhoto.caption.text.isEmpty else { return nil }
-            return messagePhoto.caption
-        case .messageVoiceNote(let messageVoiceNote):
-            guard !messageVoiceNote.caption.text.isEmpty else { return nil }
-            return messageVoiceNote.caption
-        default:
-            return nil
-        }
+
+    var messageReactions: [MessageReaction] {
+        customMessage.message.interactionInfo?.reactions?.reactions ?? []
+    }
+
+    var reactionChoices: [ReactionType] {
+        telegramReactionChoices(existing: messageReactions, available: customMessage.availableReactions)
+    }
+
+    func toggleReaction(_ reaction: ReactionType) {
+        chatVM.toggleReaction(reaction, on: customMessage.message)
+    }
+
+    func reply() {
+        chatVM.reply(to: customMessage)
+    }
+
+    func forward() {
+        chatVM.forward(customMessage)
+    }
+
+    func edit() {
+        chatVM.edit(customMessage)
+    }
+
+    func togglePinnedMessage() {
+        chatVM.togglePinnedMessage(customMessage.message)
+    }
+
+    func copyMessageText() {
+        guard let formattedText = telegramMessageFormattedText(customMessage.message) else { return }
+        UIPasteboard.setFormattedText(formattedText)
     }
 }

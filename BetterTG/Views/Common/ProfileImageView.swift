@@ -15,17 +15,19 @@ struct ProfileImageView: View {
     var body: some View {
         ZStack {
             if let photo {
-                AsyncTdImage(id: photo.id) { image, _ in
+                AsyncTdImage(id: photo.id, maxPixelSize: 256) { image, _ in
                     image
                         .resizable()
                         .scaledToFit()
                         .contentShape(.contextMenuPreview, Circle())
-                        .customContextMenu([
-                            .button(title: "Save", systemImage: "square.and.arrow.down") {
+                        .contextMenu {
+                            Button {
                                 guard let uiImage = UIImage(contentsOfFile: photo.local.path) else { return }
                                 UIImageWriteToSavedPhotosAlbum(uiImage, nil, nil, nil)
-                            },
-                        ]) {
+                            } label: {
+                                Label("Save", systemImage: "square.and.arrow.down")
+                            }
+                        } preview: {
                             image
                                 .resizable()
                                 .scaledToFit()

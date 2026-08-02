@@ -1,57 +1,96 @@
 // LoginView.swift
 
-import Combine
 import SwiftUI
-import TDLibKit
 
 struct LoginView: View {
+    // MARK: Lifecycle
+
+    init(
+        service: any TelegramService = TDLib.shared.service,
+        isPreview: Bool = false,
+    ) {
+        _model = State(initialValue: LoginViewModel(service: service, mode: isPreview ? .preview : .live))
+    }
+
     // MARK: Internal
 
-    @State var loginState = LoginState.phoneNumber
-    
     @State var showSelectCountryView = false
-    @State var selectedCountryNum = PhoneNumberInfo(country: "RU", phoneNumberPrefix: "7", name: "Russian Federation")
-    
-    @State var phoneNumber = ""
-    @State var code = ""
-    @State var hint = ""
-    @State var twoFactor = ""
-    
-    @State var errorShown = false
-    @State var waitPremiumErrorShown = false
-    @FocusState var focused: LoginState?
-    
+
     var body: some View {
         ZStack {
             Group {
-                switch loginState {
+                switch model.loginState {
                 case .phoneNumber:
                     loginStateView {
-                        GroupBox {
-                            HStack {
-                                Text("+\(selectedCountryNum.phoneNumberPrefix)")
-                                    
-                                TextField("Phone Number", text: $phoneNumber)
-                                    .focused($focused, equals: .phoneNumber)
-                                    .keyboardType(.numberPad)
+                        VStack(spacing: 12) {
+                            GroupBox {
+                                HStack {
+                                    Text("+")
+
+                                    TextField("Country Code", text: $model.callingCode)
+                                        .frame(width: 54)
+                                        .focused($focused, equals: .callingCode)
+                                        .keyboardType(.numberPad)
+                                        .textContentType(.telephoneNumber)
+                                        .onChange(of: model.callingCode) { _, value in
+                                            let completedCode = model.updateCallingCode(value)
+                                            if completedCode,
+                                               !showSelectCountryView,
+                                               focused == .callingCode
+                                            {
+                                                focused = .phoneNumber
+                                            }
+                                        }
+
+                                    TextField("Phone Number", text: $model.phoneNumber)
+                                        .focused($focused, equals: .phoneNumber)
+                                        .keyboardType(.numberPad)
+                                        .textContentType(.telephoneNumber)
+                                }
+                            } label: {
+                                Button {
+                                    showSelectCountryView.toggle()
+                                } label: {
+                                    if let country = model.selectedCountryNum {
+                                        Text("\(country.flagEmoji) \(country.name)")
+                                    } else {
+                                        Text("Select Country")
+                                    }
+                                }
                             }
-                        } label: {
-                            Button(selectedCountryNum.name) {
-                                showSelectCountryView.toggle()
-                            }
+
+                            Text(TelegramLoginGuidance.smsWarning)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
                         }
                     }
                     .sheet(isPresented: $showSelectCountryView) {
                         SelectCountryView(
                             showSelectCountryView: $showSelectCountryView,
-                            selectedCountryNum: $selectedCountryNum,
-                        )
+                            countryNums: model.countryNums,
+                        ) { country in
+                            model.selectCountry(country)
+                            focusesPhoneNumberAfterCountrySelection = true
+                        }
                         .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.hidden)
                     }
+                    .onChange(of: showSelectCountryView) { _, isPresented in
+                        guard !isPresented, focusesPhoneNumberAfterCountrySelection else { return }
+                        focusesPhoneNumberAfterCountrySelection = false
+                        focused = .phoneNumber
+                    }
                 case .code:
                     loginStateView {
-                        TextField("Code", text: $code)
+                        TextField("Code", text: $model.code)
+                            .onChange(of: model.code) { _, code in
+                                if let expectedCodeLength = model.expectedCodeLength,
+                                   code.count == expectedCodeLength
+                                {
+                                    model.continueLogin()
+                                }
+                            }
                             .focused($focused, equals: .code)
                             .keyboardType(.numberPad)
                             .padding()
@@ -60,7 +99,7 @@ struct LoginView: View {
                     }
                 case .twoFactor:
                     loginStateView {
-                        SecureField(hint.isEmpty ? "2FA" : hint, text: $twoFactor)
+                        SecureField(model.hint.isEmpty ? "2FA" : model.hint, text: $model.twoFactor)
                             .focused($focused, equals: .twoFactor)
                             .textContentType(.password)
                             .keyboardType(.alphabet)
@@ -78,65 +117,54 @@ struct LoginView: View {
                 .combined(with: .opacity),
             )
         }
-        .animation(.default, value: loginState)
+        .animation(.default, value: model.loginState)
+        #if DEBUG
+        .safeAreaInset(edge: .top) {
+            if !model.isPreview {
+                Button("Load Mock Data") {
+                    MockData.install()
+                }
+                .padding()
+            }
+        }
+        #endif
         .safeAreaInset(edge: .bottom) {
-            Button {
-                withAnimation {
-                    guard let focused else { return }
-                    self.focused =
-                        switch focused {
-                        case .phoneNumber: .code
-                        case .code: .twoFactor
-                        case .twoFactor: nil
-                        }
-                }
-                Task.background {
-                    switch try? await td.getAuthorizationState() {
-                    case .authorizationStateWaitPassword:
-                        _ = try? await td.checkAuthenticationPassword(password: twoFactor)
-                    case .authorizationStateWaitCode:
-                        _ = try? await td.checkAuthenticationCode(code: code)
-                    case .authorizationStateWaitPhoneNumber:
-                        _ = try? await td.setAuthenticationPhoneNumber(
-                            phoneNumber: "\(selectedCountryNum.phoneNumberPrefix)\(phoneNumber)",
-                            settings: nil,
-                        )
-                    default:
-                        break
+                Button {
+                    if model.loginState == .phoneNumber {
+                        focused = nil
                     }
+                    model.continueLogin()
+                } label: {
+                    Text("Continue")
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity)
                 }
-            } label: {
-                Text("Continue")
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .padding()
             }
-            .buttonStyle(.borderedProminent)
-            .padding()
-        }
-        .alert("Error", isPresented: $errorShown) {
-            Text("There was an error with Authorization State. Please, restart the app.")
-        }
-        .alert("Error", isPresented: $waitPremiumErrorShown) {
-            Text("In order to login, you need to upgrade to Telegram Premium. Please, do it in the Telegram app.")
-        }
-        .task {
-            switch try? await td.getAuthorizationState() {
-            case .authorizationStateWaitPassword: loginState = .twoFactor
-            case .authorizationStateWaitCode: loginState = .code
-            case .authorizationStateClosed, .authorizationStateClosing, .authorizationStateLoggingOut:
-                errorShown = true
-            case .authorizationStateWaitPremiumPurchase:
-                waitPremiumErrorShown = true
-            default: break
+            .alert("Error", isPresented: $model.errorShown) {
+                Text("There was an error with Authorization State. Please restart the app.")
             }
-        }
-        .onAppear(perform: setPublishers)
+            .alert("Error", isPresented: $model.waitPremiumErrorShown) {
+                Text("In order to login, you need to upgrade to Telegram Premium. Please do it in the Telegram app.")
+            }
+            .alert(model.formattedPhoneNumber, isPresented: $model.showPhoneConfirmation) {
+                Button("Edit", role: .cancel) {
+                    focused = .phoneNumber
+                }
+                Button("Yes") {
+                    model.submitPhoneNumber()
+                }
+            } message: {
+                Text("Is this the correct number?")
+            }
+            .task { await model.start() }
     }
-    
+
     func loginStateView(_ content: () -> some View) -> some View {
         VStack(spacing: 10) {
             Spacer()
-            Text(loginState.title)
+            Text(model.loginState.title)
                 .font(.system(.largeTitle, weight: .bold))
             Spacer()
             content()
@@ -147,26 +175,15 @@ struct LoginView: View {
 
     // MARK: Private
 
-    @State private var cancellables = Set<AnyCancellable>()
-    
-    private func setPublishers() {
-        nc.publisher(&cancellables, for: .authorizationStateWaitPassword) { notification in
-            guard let waitPassword = notification.object as? AuthorizationStateWaitPassword else { return }
-            Task.main {
-                loginState = .twoFactor
-                withAnimation { hint = waitPassword.passwordHint }
-            }
-        }
-        nc.publisher(&cancellables, for: .authorizationStateWaitCode) { _ in
-            Task.main { loginState = .code }
-        }
-        nc.mergeMany(&cancellables, [
-            .authorizationStateWaitPhoneNumber,
-            .authorizationStateClosed,
-            .authorizationStateClosing,
-            .authorizationStateLoggingOut,
-        ]) { _ in
-            Task.main { loginState = .phoneNumber }
-        }
+    private enum FocusedField: Hashable {
+        case callingCode
+        case code
+        case phoneNumber
+        case twoFactor
     }
+
+    @FocusState private var focused: FocusedField?
+
+    @State private var focusesPhoneNumberAfterCountrySelection = false
+    @State private var model: LoginViewModel
 }

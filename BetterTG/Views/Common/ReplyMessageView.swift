@@ -8,6 +8,24 @@ struct ReplyMessageView: View {
     let type: ReplyMessageType
     let onTap: () -> Void
     
+    var accessibilityDescription: String {
+        switch type {
+        case .edit:
+            "Editing message: \(telegramMessageContentDescription(customMessage.message))"
+        case .reply:
+            "Replying to \(customMessage.senderUser?.firstName ?? "message"): "
+                + telegramMessageContentDescription(customMessage.message)
+        case .replied:
+            if let replySenderName = customMessage.replySenderName,
+               let replyToMessage = customMessage.replyToMessage
+            {
+                "Reply to \(replySenderName): \(telegramMessageContentDescription(replyToMessage))"
+            } else {
+                "Reply"
+            }
+        }
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 5) {
             Capsule()
@@ -32,10 +50,10 @@ struct ReplyMessageView: View {
                         Text(type == .edit ? "Edit message" : customMessage.senderUser?.firstName ?? "Name")
                         inlineMessageContentText(from: customMessage.message)
                     case .replied:
-                        if let replyUser = customMessage.replyUser,
+                        if let replySenderName = customMessage.replySenderName,
                            let replyToMessage = customMessage.replyToMessage
                         {
-                            Text(replyUser.firstName)
+                            Text(replySenderName)
                             inlineMessageContentText(from: replyToMessage)
                         }
                     }
@@ -56,12 +74,23 @@ struct ReplyMessageView: View {
                 onTap()
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            withAnimation {
+                onTap()
+            }
+        }
     }
-    
+
     @ViewBuilder func inlineMessageContent(for message: Message) -> some View {
         switch message.content {
         case .messagePhoto(let messagePhoto):
             TdImage(photo: messagePhoto.photo, size: .sBox, contentMode: .fit)
+                .frame(width: 30, height: 30)
+        case .messageVideo(let messageVideo):
+            TdVideoThumbnail(messageVideo: messageVideo, contentMode: .fit)
                 .frame(width: 30, height: 30)
         default:
             EmptyView()
@@ -78,6 +107,12 @@ struct ReplyMessageView: View {
             } else {
                 Text(getAttributedString(from: messagePhoto.caption))
             }
+        case .messageVideo(let messageVideo):
+            if messageVideo.caption.text.isEmpty {
+                Text("Video")
+            } else {
+                Text(getAttributedString(from: messageVideo.caption))
+            }
         case .messageVoiceNote(let messageVoiceNote):
             HStack(alignment: .bottom, spacing: 0) {
                 Text("Voice")
@@ -89,6 +124,14 @@ struct ReplyMessageView: View {
                         
                     Text(getAttributedString(from: messageVoiceNote.caption))
                 }
+            }
+        case .messageAudio(let messageAudio):
+            Text(telegramAudioDescription(messageAudio))
+        case .messageDocument(let messageDocument):
+            if messageDocument.caption.text.isEmpty {
+                Text("File: \(messageDocument.document.fileName)")
+            } else {
+                Text(getAttributedString(from: messageDocument.caption))
             }
         case .messageUnsupported:
             Text("TDLib not supported")

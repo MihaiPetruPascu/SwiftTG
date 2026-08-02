@@ -1,39 +1,36 @@
 // SelectCountryView.swift
 
 import SwiftUI
-import TDLibKit
 
 struct SelectCountryView: View {
     @Binding var showSelectCountryView: Bool
-    @Binding var selectedCountryNum: PhoneNumberInfo
-    
-    @State var countryNums = [PhoneNumberInfo]()
+    let countryNums: [PhoneNumberInfo]
+    let selectCountry: (PhoneNumberInfo) -> Void
+
     @State var query = ""
     
     var filteredCountries: [PhoneNumberInfo] {
         countryNums
-            .filter { country in
-                query.isEmpty
-                    || country.name.lowercased().contains(query.lowercased())
-                    || country.phoneNumberPrefix.lowercased().contains(query.lowercased())
-                    || country.country.lowercased().contains(query.lowercased())
-            }
+            .filter { $0.matches(query) }
     }
     
     var body: some View {
         NavigationStack {
-            List(filteredCountries, id: \.self) { info in
+            List(filteredCountries) { info in
                 Button {
-                    selectedCountryNum = info
+                    selectCountry(info)
                     showSelectCountryView.toggle()
                 } label: {
                     HStack {
+                        Text(info.flagEmoji)
                         Text(info.name)
                         Spacer()
                         Text("+\(info.phoneNumberPrefix)")
                     }
                     .foregroundStyle(.white)
                 }
+                .accessibilityLabel(info.accessibilityLabel)
+                .accessibilityHint("Selects country")
             }
             .background(.black)
             .padding(.top, -20)
@@ -48,31 +45,5 @@ struct SelectCountryView: View {
                 }
             }
         }
-        .task { await loadCountries() }
-    }
-    
-    func loadCountries() async {
-        guard let countries = try? await td.getCountries().countries,
-              let countryCode = try? await td.getCountryCode().text,
-              let country = countries.first(where: { $0.countryCode == countryCode })
-        else { return }
-        
-        let selectedCountryNum = PhoneNumberInfo(
-            country: country.countryCode,
-            phoneNumberPrefix: country.callingCodes[0],
-            name: country.englishName,
-        )
-        let countryNums = countries
-            .map {
-                PhoneNumberInfo(
-                    country: $0.countryCode,
-                    phoneNumberPrefix: $0.callingCodes[0],
-                    name: $0.englishName,
-                )
-            }
-            .sorted { $0.name < $1.name }
-        
-        self.selectedCountryNum = selectedCountryNum
-        self.countryNums = countryNums
     }
 }

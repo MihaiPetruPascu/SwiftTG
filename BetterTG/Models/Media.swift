@@ -1,36 +1,37 @@
 // Media.swift
 
-import Combine
+import AVFoundation
 import MediaPlayer
-import MobileVLCKit
 import Observation
-import SwiftUI
 
+/// Thin iOS wrapper around the shared `VoiceMessagePlaybackEngine`, adding audio session setup
+/// and Now Playing/remote-command-center integration around it. macOS's `MacVoicePlayer` wraps
+/// the same engine without either, since neither applies there.
 @Observable final class Media {
     // MARK: Lifecycle
 
     init() {
-        setPublishers()
+        engine = MainActor.assumeIsolated { VoiceMessagePlaybackEngine() }
         setCommandCenterControls()
+        MainActor.assumeIsolated {
+            engine.trace = { voicePlaybackTrace($0) }
+            engine.onWillPlay = { [weak self] in self?.setAudioSessionPlayback() ?? false }
+            engine.onPlayStarted = { [weak self] in self?.setNowPlaying() }
+            engine.onTick = { [weak self] in self?.changeCurrentTime() }
+            engine.onStopped = { [weak self] in self?.nowPlayingCenter.nowPlayingInfo = nil }
+        }
     }
 
     // MARK: Internal
 
     static let shared = Media()
 
-    var savedMediaPath = ""
-    var isPlaying = false
-    var currentTime: Int32 = 0
+    var savedMediaPath: String { MainActor.assumeIsolated { engine.currentPath } ?? "" }
+    var isPlaying: Bool { MainActor.assumeIsolated { engine.isPlaying } }
+    var currentTime: Int32 { Int32(MainActor.assumeIsolated { engine.currentTime }) }
 
     func stop() {
-        withAnimation {
-            isPlaying = false
-            currentTime = 0
-            savedMediaPath = ""
-            player.media = nil
-            player.stop()
-            nowPlayingCenter.nowPlayingInfo = nil
-        }
+        MainActor.assumeIsolated { engine.stop() }
     }
 
     func onChatOpen(title: String) {
@@ -38,42 +39,36 @@ import SwiftUI
     }
 
     func onChatDismiss() {
-        player.stop()
+        MainActor.assumeIsolated { engine.pause() }
     }
 
     func seekForward() {
-        player.jumpForward(5)
+        MainActor.assumeIsolated { engine.seekForward() }
     }
 
     func seekBackward() {
-        player.jumpBackward(5)
+        MainActor.assumeIsolated { engine.seekBackward() }
     }
 
     func toggle(with path: String, duration: Int) {
-        self.duration = duration
-        withAnimation {
-            if savedMediaPath.isEmpty || savedMediaPath != path {
-                savedMediaPath = path
-                stop()
-                savedMediaPath = path
-                player.media = VLCMedia(path: path)
-                play()
-            } else {
-                toggle()
-            }
-        }
+        MainActor.assumeIsolated { engine.toggle(path: path, duration: duration) }
     }
 
     func setAudioSessionRecord() {
         do {
-            try audioSession.setActive(false)
-            try audioSession.setCategory(.playAndRecord, mode: .default, policy: .default, options: [
+            var options: AVAudioSession.CategoryOptions = [
                 .allowAirPlay,
                 .allowBluetoothHFP,
                 .allowBluetoothA2DP,
                 .defaultToSpeaker,
                 .overrideMutedMicrophoneInterruption,
-            ])
+            ]
+            if UIAccessibility.isVoiceOverRunning {
+                options.insert(.mixWithOthers)
+            }
+            // Deactivating the shared session here interrupts VoiceOver before recording starts
+            // and makes it play its context-change earcon when its audio resumes.
+            try audioSession.setCategory(.playAndRecord, mode: .default, policy: .default, options: options)
             try audioSession.setActive(true)
         } catch {
             log("Error setting audioSessionRecord: \(error)")
@@ -82,33 +77,33 @@ import SwiftUI
 
     // MARK: Private
 
-    @ObservationIgnored private var duration = 0
     @ObservationIgnored private var title = ""
-
-    private let player = VLCMediaPlayer()
+    @ObservationIgnored private let engine: VoiceMessagePlaybackEngine
     private let audioSession = AVAudioSession.sharedInstance()
     private let nowPlayingCenter = MPNowPlayingInfoCenter.default()
     private let commandCenter = MPRemoteCommandCenter.shared()
-    @ObservationIgnored private var cancellables = Set<AnyCancellable>()
 
-    private func setPublishers() {
-        player
-            .publisher(for: \.time, options: [.new])
-            .sink { [weak self] time in
-                guard let self else { return }
-                currentTime = time.intValue / 1000
-                changeCurrentTime()
-            }
-            .store(in: &cancellables)
+    private func changeCurrentTime() {
+        nowPlayingCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(currentTime)
+    }
 
-        player
-            .publisher(for: \.state, options: [.new])
-            .sink { [weak self] state in
-                guard let self else { return }
-                guard case .ended = state else { return }
-                stop()
-            }
-            .store(in: &cancellables)
+    private func setAudioSessionPlayback() -> Bool {
+        do {
+            try audioSession.setCategory(.playback, mode: .spokenAudio, policy: .default, options: [
+                .mixWithOthers,
+                .interruptSpokenAudioAndMixWithOthers,
+            ])
+            try audioSession.setActive(true, options: [])
+            let outputs = audioSession.currentRoute.outputs
+                .map { "\($0.portType.rawValue):\($0.portName)" }
+                .joined(separator: ",")
+            voicePlaybackTrace("session active outputs=[\(outputs)] volume=\(audioSession.outputVolume)")
+            return true
+        } catch {
+            voicePlaybackTrace("session failed: \(error.localizedDescription)")
+            log("Error setting audioSessionPlayback: \(error)")
+            return false
+        }
     }
 
     private func setCommandCenterControls() {
@@ -117,109 +112,63 @@ import SwiftUI
 
         commandCenter.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            if !savedMediaPath.isEmpty, player.media != nil, !isPlaying {
-                play()
+            return MainActor.assumeIsolated {
+                guard !self.savedMediaPath.isEmpty, self.engine.isReady, !self.isPlaying else { return .commandFailed }
+                self.engine.play()
                 return .success
             }
-            return .commandFailed
         }
 
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            if !savedMediaPath.isEmpty, player.media != nil, isPlaying {
-                pause()
+            return MainActor.assumeIsolated {
+                guard !self.savedMediaPath.isEmpty, self.engine.isReady, self.isPlaying else { return .commandFailed }
+                self.engine.pause()
                 return .success
             }
-            return .commandFailed
         }
 
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            if !savedMediaPath.isEmpty, player.media != nil {
-                toggle()
+            return MainActor.assumeIsolated {
+                guard !self.savedMediaPath.isEmpty, self.engine.isReady else { return .commandFailed }
+                if self.isPlaying { self.engine.pause() } else { self.engine.play() }
                 return .success
             }
-            return .commandFailed
         }
 
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self else { return .commandFailed }
-            if let positionEvent = event as? MPChangePlaybackPositionCommandEvent {
-                seekTo(positionEvent.positionTime)
-                return .success
+            guard let self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
             }
-            return .commandFailed
+            MainActor.assumeIsolated { self.engine.seek(to: positionEvent.positionTime) }
+            return .success
         }
 
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            if !savedMediaPath.isEmpty, player.media != nil {
-                seekForward()
+            return MainActor.assumeIsolated {
+                guard !self.savedMediaPath.isEmpty, self.engine.isReady else { return .commandFailed }
+                self.engine.seekForward()
                 return .success
             }
-            return .commandFailed
         }
 
         commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            if !savedMediaPath.isEmpty, player.media != nil {
-                seekBackward()
+            return MainActor.assumeIsolated {
+                guard !self.savedMediaPath.isEmpty, self.engine.isReady else { return .commandFailed }
+                self.engine.seekBackward()
                 return .success
             }
-            return .commandFailed
         }
-    }
-
-    private func toggle() {
-        withAnimation {
-            if isPlaying {
-                pause()
-            } else {
-                play()
-            }
-        }
-    }
-
-    private func pause() {
-        player.pause()
-        isPlaying = false
-    }
-
-    private func setAudioSessionPlayback() {
-        do {
-            try audioSession.setActive(false)
-            try audioSession.setCategory(.playback, mode: .spokenAudio, policy: .default, options: [
-                .allowBluetoothHFP,
-                .allowBluetoothA2DP,
-            ])
-            try audioSession.setActive(true)
-        } catch {
-            log("Error setting audioSessionPlayback: \(error)")
-        }
-    }
-
-    private func play() {
-        setAudioSessionPlayback()
-        player.play()
-        isPlaying = true
-        setNowPlaying()
-    }
-
-    private func changeCurrentTime() {
-        nowPlayingCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(currentTime)
-    }
-
-    private func seekTo(_ timeInterval: TimeInterval) {
-        let number = NSNumber(floatLiteral: timeInterval * 1000)
-        let time = VLCTime(number: number)
-        player.time = time
     }
 
     private func setNowPlaying() {
         var info = [String: Any]()
         info[MPMediaItemPropertyTitle] = title
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(currentTime)
-        info[MPMediaItemPropertyPlaybackDuration] = Double(duration)
+        info[MPMediaItemPropertyPlaybackDuration] = Double(MainActor.assumeIsolated { engine.duration })
         nowPlayingCenter.nowPlayingInfo = info
     }
 }

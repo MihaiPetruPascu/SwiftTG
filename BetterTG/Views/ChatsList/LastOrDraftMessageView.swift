@@ -14,15 +14,23 @@ struct LastOrDraftMessageView: View {
                 DraftMessageView(draftMessage: draftMessage)
             } else if let lastMessage = customChat.lastMessage {
                 HStack(spacing: 3) {
+                    if customChat.showsLastMessageSender,
+                       let senderName = customChat.lastMessageSenderName
+                    {
+                        Text("\(senderName):")
+                            .foregroundStyle(.tint)
+                    }
+
                     if lastMessage.forwardInfo != nil {
                         Image(systemName: "arrowshape.turn.up.right.fill")
+                            .accessibilityHidden(true)
                     }
                     
                     LastMesssageView(lastMessage: lastMessage)
                 }
             }
         }
-        .foregroundStyle(.gray)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
         .allowsHitTesting(false)
     }
@@ -40,11 +48,11 @@ private struct DraftMessageView: View {
             
             if draftMessage.replyTo != nil {
                 Text("reply ")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             
-            if case .inputMessageText(let inputMessageText) = draftMessage.inputMessageText {
-                Text(getAttributedString(from: inputMessageText.text, .gray))
+            if case .draftMessageContentText(let draftMessageContentText) = draftMessage.content {
+                Text(getAttributedString(from: draftMessageContentText.text, .gray))
             }
         }
     }
@@ -68,17 +76,36 @@ private struct LastMesssageView: View {
                     Text(getAttributedString(from: messagePhoto.caption, .gray))
                 }
             }
+        case .messageVideo(let messageVideo):
+            HStack(alignment: .center, spacing: 3) {
+                TdVideoThumbnail(messageVideo: messageVideo, contentMode: .fit)
+                    .frame(width: 20, height: 20)
+
+                if messageVideo.caption.text.isEmpty {
+                    Text("Video")
+                } else {
+                    Text(getAttributedString(from: messageVideo.caption, .gray))
+                }
+            }
         case .messageVoiceNote(let messageVoiceNote):
             HStack(alignment: .bottom, spacing: 0) {
                 Text("Voice")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     
                 if !messageVoiceNote.caption.text.isEmpty {
                     Text(": ")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         
                     Text(getAttributedString(from: messageVoiceNote.caption, .gray))
                 }
+            }
+        case .messageAudio(let messageAudio):
+            Text(telegramAudioDescription(messageAudio))
+        case .messageDocument(let messageDocument):
+            if messageDocument.caption.text.isEmpty {
+                Text("File: \(messageDocument.document.fileName)")
+            } else {
+                Text(getAttributedString(from: messageDocument.caption, .gray))
             }
         case .messageText(let messageText):
             Text(getAttributedString(from: messageText.text, .gray))

@@ -14,34 +14,57 @@ struct MediaAlbum: Layout {
     // MARK: Internal
 
     typealias AlbumLayout = ([(CGRect, ItemPosition)], CGSize)
-    
+
+    struct Cache {
+        var proposal: ProposedViewSize?
+        var subviewCount: Int?
+        var layout: AlbumLayout?
+    }
+
+    func makeCache(subviews _: Subviews) -> Cache {
+        Cache()
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache _: inout Void,
+        cache: inout Cache,
     ) -> CGSize {
-        generateLayout(proposal: proposal, subviews: subviews).1
-//        return CGSize(width: CGFloat.infinity, height: CGFloat.infinity)
+        let size = cachedLayout(proposal: proposal, subviews: subviews, cache: &cache).1
+        return CGSize(
+            width: finiteDimension(size.width, fallback: 1),
+            height: finiteDimension(size.height, fallback: 1),
+        )
     }
-    
+
     func placeSubviews(
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache _: inout Void,
+        cache: inout Cache,
     ) {
-        let layout = generateLayout(proposal: proposal, subviews: subviews).0
-        
-        for (index, item) in layout.enumerated() {
+        let layout = cachedLayout(proposal: proposal, subviews: subviews, cache: &cache).0
+
+        for (index, item) in layout.prefix(subviews.count).enumerated() {
             let subview = subviews[index]
-            
-            let origin = CGPoint(x: bounds.minX + item.0.origin.x, y: bounds.minY + item.0.origin.y)
+            let frame = item.0
+            guard frame.origin.x.isFinite,
+                  frame.origin.y.isFinite,
+                  frame.size.width.isFinite,
+                  frame.size.height.isFinite,
+                  bounds.minX.isFinite,
+                  bounds.minY.isFinite
+            else { continue }
+
+            let origin = CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY)
+            guard origin.x.isFinite, origin.y.isFinite else { continue }
             
             subview.place(
                 at: origin,
+                anchor: .topLeading,
                 proposal: ProposedViewSize(
-                    width: item.0.size.width,
-                    height: item.0.size.height,
+                    width: finiteDimension(frame.width, fallback: 1),
+                    height: finiteDimension(frame.height, fallback: 1),
                 ),
             )
         }
@@ -49,25 +72,44 @@ struct MediaAlbum: Layout {
     
     // MARK: Private
 
+    private func cachedLayout(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> AlbumLayout {
+        if let cached = cache.layout, cache.proposal == proposal, cache.subviewCount == subviews.count {
+            return cached
+        }
+        let layout = generateLayout(proposal: proposal, subviews: subviews)
+        cache.layout = layout
+        cache.proposal = proposal
+        cache.subviewCount = subviews.count
+        return layout
+    }
+
     /// Please don't kill me for this code, I just got it from TG iOS, it's
     /// not documented at all
     private func generateLayout(proposal: ProposedViewSize, subviews: Subviews) -> AlbumLayout {
         // Arguments from the original function so I
         // don't waste time refactoring that steaming
         // pile of garbage
-        let maxSize = proposal.replacingUnspecifiedDimensions(by: CGSize(width: 256, height: 256))
+        let proposedSize = proposal.replacingUnspecifiedDimensions(by: CGSize(width: 256, height: 256))
+        let maxSize = CGSize(
+            width: finiteDimension(proposedSize.width, fallback: 256),
+            height: finiteDimension(proposedSize.height, fallback: 256),
+        )
         let itemSizes = subviews.map { subview in
-            subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(.unspecified)
+            return CGSize(
+                width: finiteDimension(size.width, fallback: 1),
+                height: finiteDimension(size.height, fallback: 1),
+            )
         }
         let spacing: CGFloat = 1
-//        let fillWidth = false
-        
+
         var proportions = ""
         var averageAspectRatio: CGFloat = 1.0
         var forceCalc = false
         
         var itemInfos = itemSizes.enumerated().map { index, itemSize -> ItemInfo in
-            let aspectRatio = itemSize.height.isZero ? 1.0 : itemSize.width / itemSize.height
+            let rawAspectRatio = itemSize.height.isZero ? 1.0 : itemSize.width / itemSize.height
+            let aspectRatio = rawAspectRatio.isFinite ? max(0.01, min(100, rawAspectRatio)) : 1.0
             if aspectRatio > 1.2 {
                 proportions += "w"
             } else if aspectRatio < 0.8 {
@@ -168,16 +210,10 @@ struct MediaAlbum: Layout {
                             round(min(thirdHeight * itemInfos[2].aspectRatio, secondHeight * itemInfos[1].aspectRatio)),
                         ),
                     )
-//                    if fillWidth {
-//                        rightWidth = floorToScreenPixels(maxSize.width / 2.0)
-//                    }
                     let leftWidth = round(min(
                         firstHeight * itemInfos[0].aspectRatio,
                         maxSize.width - spacing - rightWidth,
                     ))
-//                    if fillWidth {
-//                        leftWidth = maxSize.width - spacing - rightWidth
-//                    }
                     itemInfos[0].layoutFrame = CGRect(x: 0.0, y: 0.0, width: leftWidth, height: firstHeight)
                     itemInfos[0].position = [.top, .left, .bottom]
                     
@@ -489,6 +525,11 @@ struct MediaAlbum: Layout {
                 ), $0.1) },
             dimensions,
         )
+    }
+
+    private func finiteDimension(_ value: CGFloat, fallback: CGFloat) -> CGFloat {
+        guard value.isFinite, value > 0 else { return fallback }
+        return value
     }
 }
 
