@@ -97,12 +97,65 @@ import UIKit
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    func startIncomingCallTone() {
+        guard incomingCallToneEngine == nil else { return }
+
+        let sampleRate = 44_100.0
+        let duration = 3.0
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: format,
+                  frameCapacity: AVAudioFrameCount(sampleRate * duration)
+              ),
+              let samples = buffer.floatChannelData?[0]
+        else { return }
+
+        buffer.frameLength = buffer.frameCapacity
+        for frame in 0 ..< Int(buffer.frameLength) {
+            let time = Double(frame) / sampleRate
+            let cycleTime = time.truncatingRemainder(dividingBy: 1.5)
+            guard cycleTime < 0.8 else {
+                samples[frame] = 0
+                continue
+            }
+            let fade = min(1, min(cycleTime / 0.02, (0.8 - cycleTime) / 0.02))
+            samples[frame] = Float((sin(2 * .pi * 440 * time) + sin(2 * .pi * 480 * time)) * 0.12 * fade)
+        }
+
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .voicePrompt)
+            try session.setActive(true)
+            try engine.start()
+            player.scheduleBuffer(buffer, at: nil, options: .loops)
+            player.play()
+            incomingCallToneEngine = engine
+            incomingCallTonePlayer = player
+        } catch {
+            engine.stop()
+        }
+    }
+
+    func stopIncomingCallTone() {
+        incomingCallTonePlayer?.stop()
+        incomingCallToneEngine?.stop()
+        incomingCallTonePlayer = nil
+        incomingCallToneEngine = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     // MARK: Private
 
     private var incomingMessageSound: SystemSoundID = 0
     private var messageDeliveredSound: SystemSoundID = 0
     private var callToneEngine: AVAudioEngine?
     private var callTonePlayer: AVAudioPlayerNode?
+    private var incomingCallToneEngine: AVAudioEngine?
+    private var incomingCallTonePlayer: AVAudioPlayerNode?
     private var policy = TelegramServiceSoundPolicy()
 
     private func loadSound(named name: String, extension fileExtension: String) -> SystemSoundID {

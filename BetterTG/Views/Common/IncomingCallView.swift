@@ -1,0 +1,159 @@
+import SwiftUI
+
+struct IncomingCallView: View {
+    let coordinator: IncomingCallCoordinator
+
+    @State private var isMuted = false
+    @State private var isSpeakerEnabled = true
+    @State private var isCameraEnabled = false
+
+    private var isConnected: Bool {
+        if case .ready = coordinator.phase { return true }
+        return false
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [.indigo.opacity(0.9), .blue.opacity(0.75), .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                Spacer()
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 136))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .accessibilityHidden(true)
+
+                Text(coordinator.callerName)
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+
+                Label(
+                    coordinator.phase.title,
+                    systemImage: coordinator.isVideo ? "video.fill" : "phone.fill"
+                )
+                .font(.title3)
+                .foregroundStyle(.white.opacity(0.9))
+
+                if case .ready(let emojis) = coordinator.phase, !emojis.isEmpty {
+                    Text(emojis.joined(separator: " "))
+                        .font(.title)
+                        .accessibilityLabel("Call encryption verification")
+                }
+                Spacer()
+            }
+            .padding()
+        }
+        .interactiveDismissDisabled()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if coordinator.phase == .incoming {
+                incomingControls
+            } else {
+                activeControls
+            }
+        }
+        .onChange(of: coordinator.isVideo, initial: true) { _, value in
+            isCameraEnabled = value
+        }
+    }
+
+    private var incomingControls: some View {
+        HStack {
+            roundButton(title: "Decline", systemImage: "phone.down.fill", color: .red) {
+                coordinator.decline()
+            }
+            Spacer()
+            roundButton(
+                title: "Accept",
+                systemImage: coordinator.isVideo ? "video.fill" : "phone.fill",
+                color: .green
+            ) {
+                coordinator.accept()
+            }
+        }
+        .padding(.horizontal, 54)
+        .padding(.vertical, 24)
+        .background(.black.opacity(0.22))
+    }
+
+    private var activeControls: some View {
+        HStack(spacing: 16) {
+            roundButton(
+                title: "Mute",
+                systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
+                color: isMuted ? .white : .white.opacity(0.18),
+                foreground: isMuted ? .black : .white
+            ) {
+                isMuted.toggle()
+                coordinator.setMuted(isMuted)
+            }
+            .disabled(!isConnected)
+
+            roundButton(
+                title: isCameraEnabled ? "Camera off" : "Camera",
+                systemImage: isCameraEnabled ? "video.fill" : "video.slash.fill",
+                color: isCameraEnabled ? .white : .white.opacity(0.18),
+                foreground: isCameraEnabled ? .black : .white
+            ) {
+                isCameraEnabled.toggle()
+                coordinator.setVideoEnabled(isCameraEnabled)
+            }
+            .disabled(!isConnected)
+
+            if isCameraEnabled {
+                roundButton(title: "Flip", systemImage: "camera.rotate.fill", color: .white.opacity(0.18)) {
+                    coordinator.switchCamera()
+                }
+                .disabled(!isConnected)
+            } else {
+                roundButton(
+                    title: "Speaker",
+                    systemImage: "speaker.wave.2.fill",
+                    color: isSpeakerEnabled ? .white : .white.opacity(0.18),
+                    foreground: isSpeakerEnabled ? .black : .white
+                ) {
+                    isSpeakerEnabled.toggle()
+                    coordinator.setSpeakerEnabled(isSpeakerEnabled)
+                }
+                .disabled(!isConnected)
+            }
+
+            roundButton(title: "End", systemImage: "phone.down.fill", color: .red) {
+                coordinator.hangUp()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .background(.black.opacity(0.22))
+    }
+
+    private func roundButton(
+        title: String,
+        systemImage: String,
+        color: Color,
+        foreground: Color = .white,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 60, height: 60)
+                    .foregroundStyle(foreground)
+                    .background(color, in: Circle())
+                Text(title)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 70)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}

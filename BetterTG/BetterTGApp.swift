@@ -51,6 +51,8 @@ import UserNotifications
 @MainActor final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     // MARK: Internal
 
+    private let voipPushManager = VoIPPushManager.shared
+
     func application(
         _: UIApplication,
         didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil,

@@ -42,6 +42,7 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func checkAuthenticationCode(code: String?) async throws -> Ok
     func checkAuthenticationPassword(password: String?) async throws -> Ok
     func closeChat(chatId: Int64?) async throws -> Ok
+    func acceptCall(callId: Int?, protocol: CallProtocol?) async throws -> Ok
     func createCall(isVideo: Bool?, protocol: CallProtocol?, userId: Int64?) async throws -> CallId
     func createBasicGroupChat(basicGroupId: Int64?, force: Bool?) async throws -> Chat
     func createPrivateChat(force: Bool?, userId: Int64?) async throws -> Chat
@@ -255,6 +256,10 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
 extension TelegramSession: TelegramService {
     func createCall(isVideo: Bool?, protocol: CallProtocol?, userId: Int64?) async throws -> CallId {
         try await client.createCall(isVideo: isVideo, protocol: `protocol`, userId: userId)
+    }
+
+    func acceptCall(callId: Int?, protocol: CallProtocol?) async throws -> Ok {
+        try await client.acceptCall(callId: callId, protocol: `protocol`)
     }
 
     func discardCall(

@@ -23,9 +23,29 @@ struct RootView: View {
             await PushNotificationsManager.shared.requestAuthorization()
             await PermissionsManager.shared.requestPostLoginPermissions()
         }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { incomingCall.isPresented },
+                set: { _ in }
+            )
+        ) {
+            IncomingCallView(coordinator: incomingCall)
+        }
+        .alert(
+            "Call Error",
+            isPresented: Binding(
+                get: { incomingCall.errorMessage != nil },
+                set: { if !$0 { incomingCall.errorMessage = nil } }
+            )
+        ) {
+            Button("OK") { incomingCall.errorMessage = nil }
+        } message: {
+            Text(incomingCall.errorMessage ?? "")
+        }
     }
 
     // MARK: Private
 
     @State private var rootVM = RootVM.shared
+    @State private var incomingCall = IncomingCallCoordinator.shared
 }

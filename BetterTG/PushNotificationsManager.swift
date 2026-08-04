@@ -33,6 +33,10 @@ import UserNotifications
         registration.didRegister(deviceToken: deviceToken)
     }
 
+    func didRegisterVoIP(deviceToken: Data) {
+        registration.didRegisterVoIP(deviceToken: deviceToken)
+    }
+
     func didFailToRegister(error: any Swift.Error) {
         print("APNs registration failed: \(error.localizedDescription)")
     }

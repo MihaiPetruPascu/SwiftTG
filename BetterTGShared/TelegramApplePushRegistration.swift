@@ -18,6 +18,7 @@ import TDLibKit
         guard !isStarted else { return }
         isStarted = true
         observeAuthorizationState()
+        refreshAuthorizationState()
     }
 
     func stop() {
@@ -47,6 +48,11 @@ import TDLibKit
         registerTokenIfPossible()
     }
 
+    func didRegisterVoIP(deviceToken: Data) {
+        voipToken = deviceToken.map { String(format: "%02x", $0) }.joined()
+        registerVoIPTokenIfPossible()
+    }
+
     func process(userInfo: [AnyHashable: Any]) async throws {
         let payload = userInfo.reduce(into: [String: Any]()) { result, item in
             guard let key = item.key as? String else { return }
@@ -71,10 +77,12 @@ import TDLibKit
     private var service: any TelegramService
     private let isAppSandbox: Bool
     private var apnsToken: String?
+    private var voipToken: String?
     private var authorizationSubscription: AnyCancellable?
     private var isStarted = false
     private var isTelegramReady = false
     private var registeredToken: String?
+    private var registeredVoIPToken: String?
     private var registrationTask: Task<Void, Never>?
     private var serviceGeneration: UInt64 = 0
 
@@ -85,7 +93,23 @@ import TDLibKit
                 guard case .authorizationStateReady = state else { return }
                 self?.isTelegramReady = true
                 self?.registerTokenIfPossible()
+                self?.registerVoIPTokenIfPossible()
             }
+    }
+
+    private func refreshAuthorizationState() {
+        let service = service
+        let generation = serviceGeneration
+        Task { [weak self] in
+            guard let state = try? await service.getAuthorizationState(),
+                  case .authorizationStateReady = state,
+                  self?.serviceGeneration == generation,
+                  self?.isStarted == true
+            else { return }
+            self?.isTelegramReady = true
+            self?.registerTokenIfPossible()
+            self?.registerVoIPTokenIfPossible()
+        }
     }
 
     private func registerTokenIfPossible() {
@@ -117,6 +141,32 @@ import TDLibKit
             } catch {
                 guard !Task.isCancelled else { return }
                 print("TDLib device registration failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func registerVoIPTokenIfPossible() {
+        guard isTelegramReady,
+              let voipToken,
+              registeredVoIPToken != voipToken
+        else { return }
+
+        let service = service
+        let isAppSandbox = isAppSandbox
+        Task { [weak self] in
+            do {
+                _ = try await service.registerDevice(
+                    deviceToken: .deviceTokenApplePushVoIP(.init(
+                        deviceToken: voipToken,
+                        encrypt: true,
+                        isAppSandbox: isAppSandbox,
+                    )),
+                    otherUserIds: [],
+                )
+                self?.registeredVoIPToken = voipToken
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("TDLib VoIP device registration failed: \(error.localizedDescription)")
             }
         }
     }
