@@ -6,15 +6,26 @@ import TDLibKit
 struct MessageContentView: View {
     let customMessage: CustomMessage
     let audioPlaylist: [Audio]
+    let service: any TelegramService
     let onMediaTap: (Message?) -> Void
+    var onContactTap: () -> Void = {}
     var onVoiceNoteLocalPathResolved: (String) -> Void = { _ in }
+    var onDocumentTransferStatusChange: (String?) -> Void = { _ in }
+    var documentDownloadIsPaused = false
+    var onDocumentDownloadToggle: () -> Void = {}
 
     var body: some View {
         ZStack {
             if customMessage.album.isEmpty {
                 switch customMessage.message.content {
                 case .messageDocument(let messageDocument):
-                    MessageDocumentView(document: messageDocument.document)
+                    MessageDocumentView(
+                        document: messageDocument.document,
+                        service: service,
+                        downloadIsPaused: documentDownloadIsPaused,
+                        onDownloadToggle: onDocumentDownloadToggle,
+                        onTransferStatusChange: onDocumentTransferStatusChange,
+                    )
                 case .messagePhoto(let messagePhoto):
                     makeMessagePhoto(from: messagePhoto)
                         .scaledToFit()
@@ -27,6 +38,14 @@ struct MessageContentView: View {
                     )
                 case .messageAudio(let messageAudio):
                     MessageAudioView(audio: messageAudio.audio, playlist: audioPlaylist)
+                case .messageSticker(let messageSticker):
+                    TelegramStickerView(
+                        content: messageSticker,
+                        service: service,
+                        playsAnimation: customMessage.message.sendingState == nil,
+                    )
+                case .messageContact(let messageContact):
+                    MessageContactView(content: messageContact, onTap: onContactTap)
                 default:
                     EmptyView()
                 }

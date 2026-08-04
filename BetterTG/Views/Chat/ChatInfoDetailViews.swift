@@ -6,73 +6,8 @@ import TDLibKit
 // MARK: - ChatInfoDestination
 
 enum ChatInfoDestination: Hashable {
-    case members(ChatInfoMemberFilter)
+    case members(TelegramChatInfoMemberFilter)
     case commonGroups(userId: Int64, count: Int)
-}
-
-// MARK: - ChatInfoMemberFilter
-
-enum ChatInfoMemberFilter: String, Hashable {
-    case members
-    case administrators
-    case restricted
-    case banned
-
-    // MARK: Internal
-
-    var title: String {
-        switch self {
-        case .members: "Members"
-        case .administrators: "Administrators"
-        case .restricted: "Restricted"
-        case .banned: "Banned"
-        }
-    }
-
-    var chatFilter: ChatMembersFilter {
-        switch self {
-        case .members: .chatMembersFilterMembers
-        case .administrators: .chatMembersFilterAdministrators
-        case .restricted: .chatMembersFilterRestricted
-        case .banned: .chatMembersFilterBanned
-        }
-    }
-
-    func supergroupFilter(query: String) -> SupergroupMembersFilter {
-        switch self {
-        case .members:
-            query.isEmpty
-                ? .supergroupMembersFilterRecent
-                : .supergroupMembersFilterSearch(.init(query: query))
-        case .administrators:
-            .supergroupMembersFilterAdministrators
-        case .restricted:
-            .supergroupMembersFilterRestricted(.init(query: query))
-        case .banned:
-            .supergroupMembersFilterBanned(.init(query: query))
-        }
-    }
-}
-
-// MARK: - ChatInfoMember
-
-private struct ChatInfoMember: Identifiable {
-    let id: MessageSender
-    let name: String
-    let role: String?
-    let presence: String?
-    let photo: File?
-    let minithumbnail: Minithumbnail?
-    let placeholderId: Int64
-}
-
-// MARK: - ChatInfoMembersPage
-
-private struct ChatInfoMembersPage {
-    let members: [ChatInfoMember]
-    let totalCount: Int
-    let hasMore: Bool
-    let nextOffset: Int
 }
 
 // MARK: - ChatInfoMembersView
@@ -82,7 +17,7 @@ struct ChatInfoMembersView: View {
 
     let chatId: Int64
     let isChannel: Bool
-    let filter: ChatInfoMemberFilter
+    let filter: TelegramChatInfoMemberFilter
     let service: any TelegramService
     let onSelect: (MessageSender) -> Void
 
@@ -110,8 +45,6 @@ struct ChatInfoMembersView: View {
                     memberRow(member)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(memberAccessibilityLabel(member))
-                .accessibilityHint("Opens a conversation with this member")
             }
 
             if hasMore {
@@ -124,11 +57,7 @@ struct ChatInfoMembersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search \(displayTitle.lowercased())")
         .task(id: query) {
-            if !query.isEmpty {
-                try? await Task.sleep(for: .milliseconds(250))
-            }
-            guard !Task.isCancelled else { return }
-            await reload()
+            await reload(query: query)
         }
     }
 
@@ -137,7 +66,7 @@ struct ChatInfoMembersView: View {
     @State private var hasMore = true
     @State private var isLoading = false
     @State private var loadGeneration: UInt64 = 0
-    @State private var members = [ChatInfoMember]()
+    @State private var members = [TelegramChatInfoMember]()
     @State private var nextOffset = 0
     @State private var query = ""
     @State private var totalCount = 0
@@ -146,7 +75,7 @@ struct ChatInfoMembersView: View {
         filter == .members && isChannel ? "Subscribers" : filter.title
     }
 
-    private func memberRow(_ member: ChatInfoMember) -> some View {
+    private func memberRow(_ member: TelegramChatInfoMember) -> some View {
         HStack(spacing: 12) {
             ProfileImageView(
                 photo: member.photo,
@@ -172,23 +101,22 @@ struct ChatInfoMembersView: View {
         .contentShape(.rect)
     }
 
-    private func memberAccessibilityLabel(_ member: ChatInfoMember) -> String {
-        [member.name, member.role, member.presence]
-            .compactMap(\.self)
-            .joined(separator: ", ")
-    }
-
     private func loadNextPage() {
         guard !isLoading, hasMore else { return }
         Task { await loadPage() }
     }
 
-    private func reload() async {
+    private func reload(query requestedQuery: String) async {
         loadGeneration &+= 1
         let generation = loadGeneration
         isLoading = true
-        let page = await loadMembersPage(query: query, offset: 0)
-        guard !Task.isCancelled, generation == loadGeneration else { return }
+        let page = await TelegramChatInfoLoader(service: service).loadMembers(
+            chatId: chatId,
+            filter: filter,
+            query: requestedQuery,
+            offset: 0,
+        )
+        guard !Task.isCancelled, generation == loadGeneration, requestedQuery == query else { return }
         members = page?.members ?? []
         totalCount = page?.totalCount ?? 0
         hasMore = page?.hasMore ?? false
@@ -201,7 +129,12 @@ struct ChatInfoMembersView: View {
         let generation = loadGeneration
         let requestedQuery = query
         isLoading = true
-        let page = await loadMembersPage(query: requestedQuery, offset: nextOffset)
+        let page = await TelegramChatInfoLoader(service: service).loadMembers(
+            chatId: chatId,
+            filter: filter,
+            query: requestedQuery,
+            offset: nextOffset,
+        )
         guard !Task.isCancelled, generation == loadGeneration, requestedQuery == query else { return }
         if let page {
             let knownIds = Set(members.map(\.id))
@@ -214,125 +147,6 @@ struct ChatInfoMembersView: View {
         }
         isLoading = false
     }
-
-    private func loadMembersPage(query: String, offset: Int) async -> ChatInfoMembersPage? {
-        guard let chat = try? await service.getChat(chatId: chatId) else { return nil }
-        let result: ChatMembers
-        let supportsPagination: Bool
-
-        switch chat.type {
-        case .chatTypeSupergroup(let value):
-            if filter == .administrators, !query.isEmpty {
-                guard offset == 0,
-                      let searched = try? await service.searchChatMembers(
-                          chatId: chat.id,
-                          filter: filter.chatFilter,
-                          limit: 50,
-                          query: query,
-                      )
-                else {
-                    return ChatInfoMembersPage(members: [], totalCount: 0, hasMore: false, nextOffset: 0)
-                }
-                result = searched
-                supportsPagination = false
-            } else {
-                guard let page = try? await service.getSupergroupMembers(
-                    filter: filter.supergroupFilter(query: query),
-                    limit: 50,
-                    offset: offset,
-                    supergroupId: value.supergroupId,
-                ) else { return nil }
-                result = page
-                supportsPagination = true
-            }
-        case .chatTypeBasicGroup:
-            guard offset == 0,
-                  let searched = try? await service.searchChatMembers(
-                      chatId: chat.id,
-                      filter: filter.chatFilter,
-                      limit: 200,
-                      query: query,
-                  )
-            else {
-                return ChatInfoMembersPage(members: [], totalCount: 0, hasMore: false, nextOffset: 0)
-            }
-            result = searched
-            supportsPagination = false
-        case .chatTypePrivate, .chatTypeSecret:
-            return nil
-        }
-
-        let resolved = await resolveMembers(result.members)
-        return ChatInfoMembersPage(
-            members: resolved,
-            totalCount: result.totalCount,
-            hasMore: supportsPagination && !result.members.isEmpty && offset + result.members.count < result.totalCount,
-            nextOffset: offset + result.members.count,
-        )
-    }
-
-    private func resolveMembers(_ members: [ChatMember]) async -> [ChatInfoMember] {
-        let service = service
-        let resolved = await withTaskGroup(of: (Int, ChatInfoMember?).self) { group in
-            for (index, member) in members.enumerated() {
-                group.addTask {
-                    guard !Task.isCancelled else { return (index, nil) }
-                    switch member.memberId {
-                    case .messageSenderUser(let value):
-                        guard let user = try? await service.getUser(userId: value.userId) else {
-                            return (index, nil)
-                        }
-                        return (index, ChatInfoMember(
-                            id: member.memberId,
-                            name: telegramUserDisplayName(user),
-                            role: chatInfoMemberRole(member.status, customTitle: member.tag),
-                            presence: chatInfoUserPresence(user),
-                            photo: user.profilePhoto?.small,
-                            minithumbnail: user.profilePhoto?.minithumbnail,
-                            placeholderId: user.id,
-                        ))
-                    case .messageSenderChat(let value):
-                        guard let chat = try? await service.getChat(chatId: value.chatId) else {
-                            return (index, nil)
-                        }
-                        return (index, ChatInfoMember(
-                            id: member.memberId,
-                            name: chat.title,
-                            role: chatInfoMemberRole(member.status, customTitle: member.tag),
-                            presence: nil,
-                            photo: chat.photo?.small,
-                            minithumbnail: chat.photo?.minithumbnail,
-                            placeholderId: chat.id,
-                        ))
-                    }
-                }
-            }
-
-            var collected = [(index: Int, member: ChatInfoMember)]()
-            for await (index, member) in group {
-                guard let member else { continue }
-                collected.append((index, member))
-            }
-            return collected
-        }
-        return resolved.sorted { $0.index < $1.index }.map(\.member)
-    }
-}
-
-// MARK: - ChatInfoCommonGroup
-
-private struct ChatInfoCommonGroup: Identifiable {
-    let chat: Chat
-
-    var id: Int64 { chat.id }
-}
-
-// MARK: - ChatInfoCommonGroupsPage
-
-private struct ChatInfoCommonGroupsPage {
-    let groups: [ChatInfoCommonGroup]
-    let hasMore: Bool
-    let nextOffsetChatId: Int64
 }
 
 // MARK: - ChatInfoCommonGroupsView
@@ -347,29 +161,27 @@ struct ChatInfoCommonGroupsView: View {
 
     var body: some View {
         List {
-            ForEach(groups) { group in
+            ForEach(groups, id: \.id) { group in
                 Button {
-                    onSelect(group.chat)
+                    onSelect(group)
                 } label: {
                     HStack(spacing: 12) {
                         ProfileImageView(
-                            photo: group.chat.photo?.small,
-                            minithumbnail: group.chat.photo?.minithumbnail,
-                            title: group.chat.title,
-                            userId: group.chat.id,
+                            photo: group.photo?.small,
+                            minithumbnail: group.photo?.minithumbnail,
+                            title: group.title,
+                            userId: group.id,
                             fontSize: 18,
                         )
                         .frame(width: 44, height: 44)
                         .accessibilityHidden(true)
 
-                        Text(group.chat.title)
+                        Text(group.title)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(group.chat.title)
-                .accessibilityHint("Opens this group")
             }
 
             if hasMore {
@@ -392,13 +204,16 @@ struct ChatInfoCommonGroupsView: View {
 
     // MARK: Private
 
-    @State private var groups = [ChatInfoCommonGroup]()
+    @State private var groups = [Chat]()
     @State private var hasMore = true
     @State private var isLoading = true
     @State private var nextOffsetChatId: Int64 = 0
 
     private func loadGroups() async {
-        let page = await loadPage(offsetChatId: 0)
+        let page = await TelegramChatInfoLoader(service: service).loadCommonGroups(
+            userId: userId,
+            offsetChatId: 0,
+        )
         groups = page.groups
         hasMore = page.hasMore
         nextOffsetChatId = page.nextOffsetChatId
@@ -409,108 +224,15 @@ struct ChatInfoCommonGroupsView: View {
         guard !isLoading, hasMore else { return }
         isLoading = true
         Task {
-            let page = await loadPage(offsetChatId: nextOffsetChatId)
+            let page = await TelegramChatInfoLoader(service: service).loadCommonGroups(
+                userId: userId,
+                offsetChatId: nextOffsetChatId,
+            )
             let knownIds = Set(groups.map(\.id))
             groups.append(contentsOf: page.groups.filter { !knownIds.contains($0.id) })
             hasMore = page.hasMore
             nextOffsetChatId = page.nextOffsetChatId
             isLoading = false
         }
-    }
-
-    private func loadPage(offsetChatId: Int64) async -> ChatInfoCommonGroupsPage {
-        guard !Task.isCancelled,
-              let page = try? await service.getGroupsInCommon(
-                  limit: 50,
-                  offsetChatId: offsetChatId,
-                  userId: userId,
-              )
-        else {
-            return ChatInfoCommonGroupsPage(groups: [], hasMore: false, nextOffsetChatId: offsetChatId)
-        }
-
-        let service = service
-        let resolved = await withTaskGroup(of: (Int, ChatInfoCommonGroup?).self) { group in
-            for (index, chatId) in page.chatIds.enumerated() {
-                group.addTask {
-                    guard !Task.isCancelled, let chat = try? await service.getChat(chatId: chatId) else {
-                        return (index, nil)
-                    }
-                    return (index, ChatInfoCommonGroup(chat: chat))
-                }
-            }
-
-            var collected = [(index: Int, group: ChatInfoCommonGroup)]()
-            for await (index, commonGroup) in group {
-                guard let commonGroup else { continue }
-                collected.append((index, commonGroup))
-            }
-            return collected
-        }
-        return ChatInfoCommonGroupsPage(
-            groups: resolved.sorted { $0.index < $1.index }.map(\.group),
-            hasMore: page.chatIds.count == 50,
-            nextOffsetChatId: page.chatIds.last ?? offsetChatId,
-        )
-    }
-}
-
-private func chatInfoMemberRole(_ status: ChatMemberStatus, customTitle: String) -> String? {
-    if !customTitle.isEmpty {
-        return customTitle
-    }
-    switch status {
-    case .chatMemberStatusCreator:
-        return "Owner"
-    case .chatMemberStatusAdministrator:
-        return "Administrator"
-    case .chatMemberStatusRestricted:
-        return "Restricted"
-    case .chatMemberStatusBanned:
-        return "Banned"
-    case .chatMemberStatusLeft, .chatMemberStatusMember:
-        return nil
-    }
-}
-
-private func chatInfoUserPresence(_ user: User) -> String {
-    switch user.type {
-    case .userTypeBot:
-        "Bot"
-    case .userTypeDeleted:
-        "Deleted account"
-    case .userTypeRegular, .userTypeUnknown:
-        chatInfoPresenceDescription(user.status)
-    }
-}
-
-private func chatInfoPresenceDescription(
-    _ status: UserStatus,
-    now: Foundation.Date = Foundation.Date(),
-    calendar: Calendar = .autoupdatingCurrent,
-) -> String {
-    switch status {
-    case .userStatusOnline:
-        return "Online"
-    case .userStatusOffline(let value):
-        guard value.wasOnline > 0 else { return "Offline" }
-        let date = Foundation.Date(timeIntervalSince1970: TimeInterval(value.wasOnline))
-        if calendar.isDate(date, inSameDayAs: now) {
-            return "Last seen today at \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-           calendar.isDate(date, inSameDayAs: yesterday)
-        {
-            return "Last seen yesterday at \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        return "Last seen \(date.formatted(date: .abbreviated, time: .shortened))"
-    case .userStatusRecently:
-        return "Last seen recently"
-    case .userStatusLastWeek:
-        return "Last seen within a week"
-    case .userStatusLastMonth:
-        return "Last seen within a month"
-    case .userStatusEmpty:
-        return "Last seen a long time ago"
     }
 }

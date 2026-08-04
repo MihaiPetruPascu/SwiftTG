@@ -8,33 +8,67 @@ struct MainView: View {
     // MARK: Internal
 
     var body: some View {
-        NavigationStack(path: $rootVM.path) {
-            MainNavigationRootView()
-                .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .customChat(let customChat, let messageId, let movesAccessibilityFocus):
-                        ChatView(
-                            customChat: customChat,
-                            initialMessageId: messageId,
-                            movesAccessibilityFocusToInitialMessage: movesAccessibilityFocus,
-                        )
-                    case .archive(let customFolder):
-                        FolderView(folder: customFolder)
-                            .navigationTitle(customFolder.name)
-                            .navigationBarTitleDisplayMode(.inline)
-                            .searchable(
-                                text: $rootVM.query,
-                                placement: .navigationBarDrawer(displayMode: .always),
-                                prompt: "Search archive...",
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                ContactsView(service: rootVM.service)
+            }
+            .tabItem {
+                Label("Contacts", systemImage: "person.2.fill")
+            }
+            .tag(MainTab.contacts)
+
+            NavigationStack(path: $rootVM.path) {
+                MainNavigationRootView()
+                    .navigationDestination(for: Route.self) { route in
+                        switch route {
+                        case .customChat(let customChat, let messageId, let movesAccessibilityFocus):
+                            ChatView(
+                                customChat: customChat,
+                                initialMessageId: messageId,
+                                movesAccessibilityFocusToInitialMessage: movesAccessibilityFocus,
                             )
+                        case .archive(let customFolder):
+                            FolderView(folder: customFolder)
+                                .navigationTitle(customFolder.name)
+                                .navigationBarTitleDisplayMode(.inline)
+                                .searchable(
+                                    text: $rootVM.query,
+                                    placement: .navigationBarDrawer(displayMode: .always),
+                                    prompt: "Search archive...",
+                                )
+                        }
                     }
-                }
+            }
+            .tabItem {
+                Label("Chats", systemImage: "bubble.left.and.bubble.right.fill")
+            }
+            .tag(MainTab.chats)
+
+            NavigationStack {
+                YouView(service: rootVM.service)
+            }
+            .tabItem {
+                Label("You", systemImage: "person.crop.circle")
+            }
+            .tag(MainTab.you)
+        }
+        .onChange(of: rootVM.path) { _, path in
+            if !path.isEmpty {
+                selectedTab = .chats
+            }
         }
     }
 
     // MARK: Private
 
+    private enum MainTab: Hashable {
+        case contacts
+        case chats
+        case you
+    }
+
     @Bindable private var rootVM = RootVM.shared
+    @State private var selectedTab = MainTab.chats
 }
 
 // MARK: - MainNavigationRootView
@@ -163,14 +197,14 @@ private struct MainNavigationRootView: View {
                 rootVM.navigate(to: .customChat(chat, messageId: nil))
             }
             #endif
-            if rootVM.currentFolder == nil {
+                if rootVM.currentFolder == nil {
+                    rootVM.currentFolder = rootVM.folders.first?.id
+                }
+            }
+            .onChange(of: rootVM.folders) {
+                guard rootVM.currentFolder == nil else { return }
                 rootVM.currentFolder = rootVM.folders.first?.id
             }
-        }
-        .onChange(of: rootVM.folders) {
-            guard rootVM.currentFolder == nil else { return }
-            rootVM.currentFolder = rootVM.folders.first?.id
-        }
     }
 
     var folderTabsBar: some View {

@@ -1,15 +1,25 @@
 // AttachmentPreviewView.swift
 
 import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - PresentedAttachmentError
+
+private struct PresentedAttachmentError: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
+// MARK: - AttachmentPreviewView
 
 /// Full-screen review step shown after picking photos or files, matching Telegram/Unigram's own
 /// "send media" screen: a paged preview of what's about to be sent, with one shared caption field
 /// and a way to drop individual items before confirming - rather than sending straight from the
 /// picker with the caption typed into the regular chat compose field.
 struct AttachmentPreviewView: View {
-    @Environment(ChatVM.self) var chatVM
+    // MARK: Internal
 
-    @State private var selectedIndex = 0
+    @Environment(ChatVM.self) var chatVM
 
     var body: some View {
         @Bindable var chatVM = chatVM
@@ -43,21 +53,134 @@ struct AttachmentPreviewView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: cancel)
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    addMenu
+                }
                 if itemCount > 1 {
                     ToolbarItem(placement: .primaryAction) {
                         Button("Remove", systemImage: "trash", role: .destructive, action: removeSelectedItem)
                     }
                 }
             }
-            .navigationTitle(itemCount > 1 ? "\(itemCount) Items" : (chatVM.displayedImages.isEmpty ? "Document" : "Photo"))
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(itemCount > 1
+                ? "\(itemCount) Items"
+                : (chatVM.displayedImages.isEmpty ? "Document" : "Photo"))
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .onChange(of: chatVM.messageActionError) { _, message in
+            guard let message else { return }
+            presentedError = PresentedAttachmentError(message: message)
+        }
+        .alert(item: $presentedError) { error in
+            Alert(
+                title: Text("Send Failed"),
+                message: Text(error.message),
+                dismissButton: .default(Text("OK")) {
+                    chatVM.messageActionError = nil
+                },
+            )
+        }
+        .sheet(isPresented: $showsPhotoPicker) {
+            PhotoPicker { index, image, error in
+                if let image {
+                    let baseCount = addPhotoBaseCount
+                    Task.main {
+                        withAnimation {
+                            chatVM.displayedImages.place(image, at: baseCount + index)
+                        }
+                    }
+                } else if let error {
+                    print("Error picking image: \(error.localizedDescription)")
+                }
+            } clear: {}
+                .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showsCamera) {
+            NavigationStack {
+                CameraView { selectedImage in
+                    withAnimation { chatVM.displayedImages.append(selectedImage) }
+                }
+                .navigationTitle("Camera")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .fileImporter(
+            isPresented: $showsDocumentPicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true,
+        ) { result in
+            guard case .success(let urls) = result else { return }
+            Task { @MainActor in await chatVM.appendStagedDocuments(urls) }
         }
     }
 
     // MARK: Private
 
+    @State private var selectedIndex = 0
+    @State private var presentedError: PresentedAttachmentError?
+    @State private var showsPhotoPicker = false
+    @State private var showsCamera = false
+    @State private var showsDocumentPicker = false
+    @State private var showsScheduleSendPicker = false
+    @State private var addPhotoBaseCount = 0
+
     private var itemCount: Int {
         chatVM.displayedImages.count + chatVM.displayedDocuments.count
+    }
+
+    @ViewBuilder private var addMenu: some View {
+        if chatVM.displayedImages.isEmpty {
+            Button("Add Files", systemImage: "plus") {
+                showsDocumentPicker = true
+            }
+        } else {
+            Menu("Add", systemImage: "plus") {
+                Button("Add Photos", systemImage: "photo") {
+                    addPhotoBaseCount = chatVM.displayedImages.count
+                    showsPhotoPicker = true
+                }
+                Button("Take Photo", systemImage: "camera.fill") {
+                    showsCamera = true
+                }
+            }
+        }
+    }
+
+    private var captionBar: some View {
+        @Bindable var chatVM = chatVM
+        return HStack(alignment: .bottom, spacing: 10) {
+            MessageTextEditor("Add a caption...", text: $chatVM.text, onSubmit: send) { images in
+                withAnimation {
+                    chatVM.displayedDocuments.removeAll()
+                    chatVM.displayedImages.append(contentsOf: images)
+                }
+            }
+            .lineLimit(6)
+            .padding(.horizontal, 5)
+            .background(Color.gray6)
+            .clipShape(.rect(cornerRadius: 15))
+
+            Button(action: send) {
+                Image("send")
+                    .resizable()
+                    .clipShape(.circle)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel("Send")
+            .contextMenu {
+                Button("Send Later…", systemImage: "clock") { showsScheduleSendPicker = true }
+            }
+            .accessibilityAction(named: "Send Later") { showsScheduleSendPicker = true }
+        }
+        .padding(10)
+        .background(.bar)
+        .disabled(chatVM.isSubmittingMessage)
+        .sheet(isPresented: $showsScheduleSendPicker) {
+            ScheduleSendView(allowsSendWhenOnline: chatVM.customChat.user != nil) { schedulingState in
+                chatVM.sendMessageTask?.cancel()
+                chatVM.sendMessageTask = Task.main { await chatVM.sendMessage(schedulingState: schedulingState) }
+            }
+        }
     }
 
     private func documentPreview(for url: URL) -> some View {
@@ -71,32 +194,6 @@ struct AttachmentPreviewView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
         }
-    }
-
-    private var captionBar: some View {
-        @Bindable var chatVM = chatVM
-        return HStack(alignment: .bottom, spacing: 10) {
-            MessageTextEditor("Add a caption...", text: $chatVM.text, onSubmit: send) { images in
-                withAnimation {
-                    chatVM.displayedDocuments.removeAll()
-                    chatVM.displayedImages.append(contentsOf: images)
-                }
-            }
-                .lineLimit(6)
-                .padding(.horizontal, 5)
-                .background(Color.gray6)
-                .clipShape(.rect(cornerRadius: 15))
-
-            Button(action: send) {
-                Image("send")
-                    .resizable()
-                    .clipShape(.circle)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel("Send")
-        }
-        .padding(10)
-        .background(.bar)
     }
 
     private func send() {

@@ -9,11 +9,27 @@ struct AsyncTdFile<Content: View, Placeholder: View>: View {
     init(
         id: Int,
         service: any TelegramService = TDLib.shared.service,
+        isPaused: Bool = false,
         @ViewBuilder content: @escaping (File) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
     ) {
         self.id = id
         self.service = service
+        self.isPaused = isPaused
+        self.content = content
+        self.placeholder = { _ in placeholder() }
+    }
+
+    init(
+        id: Int,
+        service: any TelegramService = TDLib.shared.service,
+        isPaused: Bool = false,
+        @ViewBuilder content: @escaping (File) -> Content,
+        @ViewBuilder placeholder: @escaping (File?) -> Placeholder,
+    ) {
+        self.id = id
+        self.service = service
+        self.isPaused = isPaused
         self.content = content
         self.placeholder = placeholder
     }
@@ -21,8 +37,9 @@ struct AsyncTdFile<Content: View, Placeholder: View>: View {
     // MARK: Internal
 
     let id: Int
+    let isPaused: Bool
     @ViewBuilder let content: (File) -> Content
-    @ViewBuilder let placeholder: () -> Placeholder
+    @ViewBuilder let placeholder: (File?) -> Placeholder
     
     var body: some View {
         ZStack {
@@ -33,12 +50,15 @@ struct AsyncTdFile<Content: View, Placeholder: View>: View {
                 {
                     content(file)
                 } else {
-                    placeholder()
+                    placeholder(file)
                 }
             }
             .transition(.opacity)
         }
-        .task(id: id) { await download(id) }
+        .task(id: "\(id):\(isPaused)") {
+            guard !isPaused else { return }
+            await download(id)
+        }
         .onReceive(service.filePublisher(fileId: id)) { updatedFile in
             withAnimation { file = updatedFile }
         }

@@ -89,6 +89,10 @@ struct TelegramMessageMetadataTests {
             "Custom event")
     }
 
+    @Test func `unsupported messages use a user-facing description`() {
+        #expect(telegramMessageContentDescription(.messageUnsupported) == "Unsupported message")
+    }
+
     @Test func `reaction choices are deduplicated and include a chosen removable reaction`() {
         let heart = ReactionType.reactionTypeEmoji(.init(emoji: "❤"))
         let thumbsUp = ReactionType.reactionTypeEmoji(.init(emoji: "👍"))
@@ -105,7 +109,8 @@ struct TelegramMessageMetadataTests {
         ]
 
         #expect(telegramReactionChoices(existing: existing, available: available) == [heart, thumbsUp])
-        #expect(telegramReactionActionTitle(heart, existing: existing) == "Remove reaction ❤")
-        #expect(telegramReactionDescription(existing) == "Reactions: ❤ 2. You reacted with ❤")
+        #expect(telegramReactionActionTitle(heart, existing: existing) == "Remove ❤")
+        #expect(telegramReactionActionTitle(thumbsUp, existing: existing) == "👍")
+        #expect(telegramReactionDescription(existing) == "Reactions: ❤ 2 in total. You also reacted")
     }
 }

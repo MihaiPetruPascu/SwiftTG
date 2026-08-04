@@ -120,6 +120,23 @@ struct TelegramSharedPoliciesTests {
         #expect(TelegramVoiceNoteSending.waveform(from: [-160, -120]).isEmpty)
     }
 
+    @Test func `local upload paths are not percent encoded`() {
+        let url = URL(fileURLWithPath: "/tmp/fișier de test.pdf")
+        let content = TelegramMessageSending.documentContent(
+            url: url,
+            caption: FormattedText(entities: [], text: ""),
+        )
+        guard case .inputMessageDocument(let documentContent) = content,
+              case .inputFileLocal(let inputFile) = documentContent.document.document
+        else {
+            Issue.record("Expected a local document input file")
+            return
+        }
+
+        #expect(inputFile.path == url.path)
+        #expect(!inputFile.path.contains("%"))
+    }
+
     /// Regression test for a bug where `MacSessionModel.sendVoiceRecording()` sent `Data()`
     /// unconditionally instead of the recorded amplitude, so every macOS-recorded voice note
     /// showed an empty waveform to every recipient (including other, real Telegram clients).
@@ -149,8 +166,8 @@ struct TelegramSharedPoliciesTests {
             .temporaryDirectory
             .appending(path: "BetterTGVoiceNoteStagingTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let staging = TelegramVoiceNoteStaging(directory: directory)
-        let fileURL = staging.fileURL()
+        let staging = TelegramOutgoingFileStaging(directory: directory)
+        let fileURL = staging.voiceNoteFileURL()
         try Data([1, 2, 3]).write(to: fileURL)
 
         staging.register(fileURL: fileURL, chatId: 10, temporaryMessageId: -20)
@@ -164,8 +181,8 @@ struct TelegramSharedPoliciesTests {
             .temporaryDirectory
             .appending(path: "BetterTGVoiceNoteStagingTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let staging = TelegramVoiceNoteStaging(directory: directory)
-        let fileURL = staging.fileURL()
+        let staging = TelegramOutgoingFileStaging(directory: directory)
+        let fileURL = staging.voiceNoteFileURL()
         try Data([1, 2, 3]).write(to: fileURL)
 
         staging.register(fileURL: fileURL, chatId: 10, temporaryMessageId: -20)
@@ -181,8 +198,8 @@ struct TelegramSharedPoliciesTests {
             .temporaryDirectory
             .appending(path: "BetterTGVoiceNoteStagingTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let staging = TelegramVoiceNoteStaging(directory: directory)
-        let fileURL = staging.fileURL()
+        let staging = TelegramOutgoingFileStaging(directory: directory)
+        let fileURL = staging.voiceNoteFileURL()
         try Data([1]).write(to: fileURL)
         let now = Date(timeIntervalSince1970: 200_000)
         try FileManager.default.setAttributes(
@@ -190,7 +207,7 @@ struct TelegramSharedPoliciesTests {
             ofItemAtPath: fileURL.path(),
         )
 
-        _ = TelegramVoiceNoteStaging(directory: directory, now: now)
+        _ = TelegramOutgoingFileStaging(directory: directory, now: now)
 
         #expect(!FileManager.default.fileExists(atPath: fileURL.path()))
     }

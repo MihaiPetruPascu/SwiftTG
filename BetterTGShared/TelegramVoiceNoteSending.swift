@@ -13,7 +13,7 @@ enum TelegramVoiceNoteSending {
         if let directory {
             return directory.appending(path: "voice_\(identifier.uuidString).ogg")
         }
-        return TelegramVoiceNoteStaging.shared.fileURL(identifier: identifier)
+        return TelegramOutgoingFileStaging.shared.voiceNoteFileURL(identifier: identifier)
     }
 
     static func waveform(from peakPowers: [Float]) -> Data {
@@ -28,6 +28,7 @@ enum TelegramVoiceNoteSending {
                 result.append(level)
             }
         }
+        guard levels.contains(where: { $0 > 0 }) else { return Data() }
         return Data(pack(levels)).prefix(63)
     }
 
@@ -39,10 +40,12 @@ enum TelegramVoiceNoteSending {
     ) -> InputMessageContent {
         .inputMessageVoiceNote(.init(
             caption: caption,
-            duration: max(1, duration),
             selfDestructType: nil,
-            voiceNote: .inputFileLocal(.init(path: url.path())),
-            waveform: waveform,
+            voiceNote: InputVoiceNote(
+                duration: max(1, duration),
+                voiceNote: .inputFileLocal(.init(path: TelegramMessageSending.localFilePath(url))),
+                waveform: waveform,
+            ),
         ))
     }
 
@@ -54,6 +57,7 @@ enum TelegramVoiceNoteSending {
         duration: Int,
         waveform: Data,
         replyTo: InputMessageReplyTo?,
+        schedulingState: MessageSchedulingState? = nil,
     ) async throws {
         let caption = await TelegramTextFormatting.addingAutomaticEntities(service: service, to: caption)
         do {
@@ -63,9 +67,10 @@ enum TelegramVoiceNoteSending {
                 contents: [content(url: url, caption: caption, duration: duration, waveform: waveform)],
                 replyTo: replyTo,
                 uploadAction: .chatActionUploadingVoiceNote(.init(progress: 0)),
+                schedulingState: schedulingState,
                 onAccepted: { messages in
                     guard let message = messages.first else { return }
-                    TelegramVoiceNoteStaging.shared.register(
+                    TelegramOutgoingFileStaging.shared.register(
                         fileURL: url,
                         chatId: chatId,
                         temporaryMessageId: message.id,
@@ -73,11 +78,11 @@ enum TelegramVoiceNoteSending {
                 },
             )
             guard !messages.isEmpty else {
-                TelegramVoiceNoteStaging.shared.discard(fileURL: url)
+                TelegramOutgoingFileStaging.shared.discard(fileURL: url)
                 return
             }
         } catch {
-            TelegramVoiceNoteStaging.shared.discard(fileURL: url)
+            TelegramOutgoingFileStaging.shared.discard(fileURL: url)
             throw error
         }
     }

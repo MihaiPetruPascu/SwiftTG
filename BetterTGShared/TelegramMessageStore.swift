@@ -14,6 +14,7 @@ enum TelegramMessageChange: Sendable {
     case messageEdited(UpdateMessageEdited)
     case messageInteractionInfo(UpdateMessageInteractionInfo)
     case messagePinChanged(UpdateMessageIsPinned)
+    case messageSendFailed(UpdateMessageSendFailed)
     case messageSendSucceeded(UpdateMessageSendSucceeded)
     case newMessage(UpdateNewMessage)
     case readInbox(UpdateChatReadInbox)
@@ -21,7 +22,7 @@ enum TelegramMessageChange: Sendable {
     case userStatus(UpdateUserStatus)
 }
 
-extension Optional where Wrapped == TelegramMessageChange {
+extension TelegramMessageChange? {
     var isHistoryMerge: Bool {
         guard case .some(.historyMerged) = self else { return false }
         return true
@@ -66,11 +67,11 @@ struct TelegramMessageSnapshot: Sendable {
 
 // MARK: - Message patching
 
-extension Message {
+private extension Message {
     /// TDLibKit's `Message` is all `let` - this is the only way to produce an updated copy.
     /// Only the fields `TelegramMessageStore.reduce(_:)` actually patches from push updates are
     /// exposed here; everything else passes through unchanged.
-    fileprivate func applying(
+    func applying(
         content: MessageContent? = nil,
         editDate: Int? = nil,
         replyMarkup: ReplyMarkup?? = nil,
@@ -88,6 +89,7 @@ extension Message {
             date: date,
             editDate: editDate ?? self.editDate,
             effectId: effectId,
+            ephemeralMessageId: ephemeralMessageId,
             factCheck: factCheck,
             forwardInfo: forwardInfo,
             guestBotCallerId: guestBotCallerId,
@@ -98,11 +100,12 @@ extension Message {
             isChannelPost: isChannelPost,
             isFromOffline: isFromOffline,
             isOutgoing: isOutgoing,
+            isPaidGramSuggestedPost: isPaidGramSuggestedPost,
             isPaidStarSuggestedPost: isPaidStarSuggestedPost,
-            isPaidTonSuggestedPost: isPaidTonSuggestedPost,
             isPinned: isPinned ?? self.isPinned,
             mediaAlbumId: mediaAlbumId,
             paidMessageStarCount: paidMessageStarCount,
+            receiverId: receiverId,
             replyMarkup: replyMarkup ?? self.replyMarkup,
             replyTo: replyTo,
             restrictionInfo: restrictionInfo,
@@ -202,13 +205,37 @@ final class TelegramMessageStore: @unchecked Sendable {
 
     func reduce(_ update: Update) {
         if case .updateMessageSendFailed(let value) = update {
-            TelegramVoiceNoteStaging.shared.messageSendFailed(
+            TelegramOutgoingFileStaging.shared.messageSendFailed(
                 chatId: value.message.chatId,
                 oldMessageId: value.oldMessageId,
                 failedMessageId: value.message.id,
             )
         }
+        // Staged-file bookkeeping has to happen regardless of whether the message ends up in the
+        // live snapshot below - a scheduled message being confirmed by the server still hands its
+        // attachment over from the temporary id to the real one, and that mapping would otherwise
+        // leak (never cleaned up) once the scheduling filter skips this update further down.
+        if case .updateMessageSendSucceeded(let value) = update {
+            TelegramOutgoingFileStaging.shared.messageSendSucceeded(
+                chatId: value.message.chatId,
+                oldMessageId: value.oldMessageId,
+            )
+        }
         guard let reduction = reduction(for: update) else { return }
+        // Scheduled messages (Send Later / Send When Online) aren't part of the live chat - they
+        // stay invisible until they actually send, at which point TDLib delivers them again through
+        // a fresh, unscheduled update. The Scheduled Messages screen is fed by its own on-demand
+        // `getChatScheduledMessages` fetch, not by this store, so there's nothing else to update here.
+        switch reduction.change {
+        case .newMessage(let value) where value.message.schedulingState != nil:
+            return
+        case .messageSendSucceeded(let value) where value.message.schedulingState != nil:
+            return
+        case .messageSendFailed(let value) where value.message.schedulingState != nil:
+            return
+        default:
+            break
+        }
         queue.async {
             let chatId = reduction.chatId
             var snapshot = self.snapshots[chatId] ?? .empty(chatId: chatId)
@@ -226,7 +253,7 @@ final class TelegramMessageStore: @unchecked Sendable {
             case .deleteMessages(let value):
                 guard !value.fromCache, value.isPermanent else { return }
                 let deletedIds = Set(value.messageIds)
-                TelegramVoiceNoteStaging.shared.messagesDeleted(
+                TelegramOutgoingFileStaging.shared.messagesDeleted(
                     chatId: chatId,
                     messageIds: value.messageIds,
                 )
@@ -236,11 +263,15 @@ final class TelegramMessageStore: @unchecked Sendable {
                 }
                 orderedIds.removeAll { deletedIds.contains($0) }
             case .messageSendSucceeded(let value):
-                TelegramVoiceNoteStaging.shared.messageSendSucceeded(
-                    chatId: chatId,
-                    oldMessageId: value.oldMessageId,
-                )
                 self.deletedMessageIds[chatId]?.remove(value.message.id)
+                messages[value.oldMessageId] = nil
+                messages[value.message.id] = value.message
+                if let index = orderedIds.firstIndex(of: value.oldMessageId) {
+                    orderedIds[index] = value.message.id
+                } else if !orderedIds.contains(value.message.id) {
+                    orderedIds.append(value.message.id)
+                }
+            case .messageSendFailed(let value):
                 messages[value.oldMessageId] = nil
                 messages[value.message.id] = value.message
                 if let index = orderedIds.firstIndex(of: value.oldMessageId) {
@@ -293,6 +324,14 @@ final class TelegramMessageStore: @unchecked Sendable {
 
     // MARK: Private
 
+    #if os(macOS)
+    /// SwiftUI's lazy list can retain every page the user has explicitly loaded. Trimming the
+    /// oldest entries here made backward pagination discard the page it had just fetched.
+    private static let maxRetainedMessagesPerChat: Int? = nil
+    #else
+    private static let maxRetainedMessagesPerChat: Int? = 500
+    #endif
+
     private let queue = DispatchQueue(label: "com.gruiachiscop.BetterTG.telegram-messages")
     private let stateLock = NSLock()
     private var deletedMessageIds = [Int64: Set<Int64>]()
@@ -304,6 +343,28 @@ final class TelegramMessageStore: @unchecked Sendable {
             return lhs.id < rhs.id
         }
         return lhs.date < rhs.date
+    }
+
+    private static func trimmed(_ snapshot: TelegramMessageSnapshot, keeping limit: Int) -> TelegramMessageSnapshot {
+        let overflow = snapshot.orderedMessageIds.count - limit
+        guard overflow > 0 else { return snapshot }
+
+        let droppedIds = snapshot.orderedMessageIds.prefix(overflow)
+        let keptIds = Array(snapshot.orderedMessageIds.suffix(from: overflow))
+        var keptMessages = snapshot.messages
+        for id in droppedIds {
+            keptMessages.removeValue(forKey: id)
+        }
+
+        return TelegramMessageSnapshot(
+            chatId: snapshot.chatId,
+            version: snapshot.version,
+            messages: keptMessages,
+            orderedMessageIds: keptIds,
+            unreadCount: snapshot.unreadCount,
+            hasMergedHistory: snapshot.hasMergedHistory,
+            change: snapshot.change,
+        )
     }
 
     private func merge(chatId: Int64, messages: [Message], marksHistoryLoaded: Bool) {
@@ -344,14 +405,6 @@ final class TelegramMessageStore: @unchecked Sendable {
         }
     }
 
-    #if os(macOS)
-    /// SwiftUI's lazy list can retain every page the user has explicitly loaded. Trimming the
-    /// oldest entries here made backward pagination discard the page it had just fetched.
-    private static let maxRetainedMessagesPerChat: Int? = nil
-    #else
-    private static let maxRetainedMessagesPerChat: Int? = 500
-    #endif
-
     private func publish(_ snapshot: TelegramMessageSnapshot) {
         dispatchPrecondition(condition: .onQueue(queue))
         let retainedSnapshot = Self.maxRetainedMessagesPerChat.map {
@@ -362,28 +415,6 @@ final class TelegramMessageStore: @unchecked Sendable {
             return subjects[retainedSnapshot.chatId]
         }
         subject?.send(retainedSnapshot)
-    }
-
-    private static func trimmed(_ snapshot: TelegramMessageSnapshot, keeping limit: Int) -> TelegramMessageSnapshot {
-        let overflow = snapshot.orderedMessageIds.count - limit
-        guard overflow > 0 else { return snapshot }
-
-        let droppedIds = snapshot.orderedMessageIds.prefix(overflow)
-        let keptIds = Array(snapshot.orderedMessageIds.suffix(from: overflow))
-        var keptMessages = snapshot.messages
-        for id in droppedIds {
-            keptMessages.removeValue(forKey: id)
-        }
-
-        return TelegramMessageSnapshot(
-            chatId: snapshot.chatId,
-            version: snapshot.version,
-            messages: keptMessages,
-            orderedMessageIds: keptIds,
-            unreadCount: snapshot.unreadCount,
-            hasMergedHistory: snapshot.hasMergedHistory,
-            change: snapshot.change,
-        )
     }
 
     private func reduction(for update: Update) -> (chatId: Int64, change: TelegramMessageChange)? {
@@ -406,6 +437,8 @@ final class TelegramMessageStore: @unchecked Sendable {
             (value.chatId, .messagePinChanged(value))
         case .updateMessageSendSucceeded(let value):
             (value.message.chatId, .messageSendSucceeded(value))
+        case .updateMessageSendFailed(let value):
+            (value.message.chatId, .messageSendFailed(value))
         case .updateNewMessage(let value):
             (value.message.chatId, .newMessage(value))
         case .updateUserStatus(let value):

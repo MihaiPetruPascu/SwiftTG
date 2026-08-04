@@ -20,15 +20,11 @@ extension RootVM {
         let generation = searchGeneration
         let service = service
         let knownChats = Dictionary(uniqueKeysWithValues: allChats.map { ($0.id, $0) })
-        let messageChatList: ChatList? =
-            switch chatList {
-            case .chatListArchive, .chatListMain: chatList
-            case .chatListFolder: nil
-            }
+        let messageChatList = TelegramSearchPolicy.messageChatListScope(for: chatList)
         isSearching = true
 
         searchTask = Task.background {
-            try? await Task<Never, Never>.sleep(for: .milliseconds(300))
+            try? await Task<Never, Never>.sleep(for: TelegramSearchPolicy.globalQueryDebounce)
             guard !Task.isCancelled else { return }
 
             async let foundChats = try? service.searchChats(limit: 50, query: normalized, typeFilter: nil)

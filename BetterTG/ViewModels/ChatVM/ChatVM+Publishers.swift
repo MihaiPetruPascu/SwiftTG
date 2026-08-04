@@ -96,6 +96,7 @@ extension ChatVM {
         case .messagePinChanged(let value):
             renderStore.invalidate(messageId: value.messageId, version: snapshot.version)
             refreshMessage(messageId: value.messageId, version: snapshot.version)
+            refreshPinnedMessages()
         case .messageSendSucceeded(let value):
             if value.message.isOutgoing {
                 ServiceSoundManager.shared.playMessageDelivered()
@@ -105,6 +106,15 @@ extension ChatVM {
             // Never mutate the id of the CustomMessage already mounted in SwiftUI's ForEach:
             // its id is the row identity, and changing it behind Observation's back leaves the
             // accessibility element attached to the temporary row. Render a new model instead.
+            renderedMessages.removeValue(forKey: value.oldMessageId)
+            renderStore.invalidate(messageId: value.message.id, version: snapshot.version)
+            if pendingScrollMessageIds.remove(value.oldMessageId) != nil {
+                pendingScrollMessageIds.insert(value.message.id)
+            }
+            reconcileMessages(with: snapshot)
+        case .messageSendFailed(let value):
+            messageActionError = "Message couldn't be sent: \(telegramErrorDescription(value.error))"
+            loadedMessageIds.insert(value.message.id)
             renderedMessages.removeValue(forKey: value.oldMessageId)
             renderStore.invalidate(messageId: value.message.id, version: snapshot.version)
             if pendingScrollMessageIds.remove(value.oldMessageId) != nil {
@@ -168,6 +178,9 @@ extension ChatVM {
                 if self.replyMessage?.message.id == message.id {
                     self.replyMessage = customMessage
                 }
+                if self.isChatTranslationEnabled {
+                    self.ensureMessageTranslated(customMessage)
+                }
                 if !replacedProvisionalMessage || self.provisionalMessageIds.isEmpty {
                     self.scheduleDisplayedMessagesRebuild()
                 }
@@ -177,19 +190,19 @@ extension ChatVM {
 
     private func initialCustomMessage(from message: Message) -> CustomMessage {
         let customMessage = CustomMessage(message: message, properties: .default)
-        if message.mediaAlbumId != 0 {
+        if message.mediaAlbumId != 0, telegramMessageSupportsVisualAlbum(message) {
             customMessage.album.append(message)
         }
         customMessage.formattedText =
             switch message.content {
             case .messageText(let messageText):
                 messageText.text
-            case .messagePhoto, .messageVideo, .messageDocument, .messageVoiceNote, .messageAudio:
+            case .messageAudio, .messageDocument, .messagePhoto, .messageVideo, .messageVoiceNote:
                 telegramMessageFormattedText(message)
-            case .messageUnsupported:
-                FormattedText(entities: [], text: "TDLib not supported")
-            default:
+            case .messagePoll, .messageSticker:
                 nil
+            default:
+                FormattedText(entities: [], text: telegramMessageContentDescription(message))
             }
         return customMessage
     }
@@ -197,7 +210,9 @@ extension ChatVM {
     @MainActor private func scheduleDisplayedMessagesRebuild() {
         guard displayedMessagesRebuildTask == nil else { return }
         displayedMessagesRebuildTask = Task { @MainActor [weak self] in
-            try? await Task<Never, Never>.sleep(for: .milliseconds(40))
+            // Render completions already arrive on the main actor. Yielding once coalesces all
+            // completions queued by the current render pass without relying on a timing constant.
+            await Task.yield()
             guard let self, !Task.isCancelled else { return }
             displayedMessagesRebuildTask = nil
             guard let snapshot = latestMessageSnapshot else { return }
@@ -208,36 +223,33 @@ extension ChatVM {
 
     @MainActor private func rebuildDisplayedMessages(from snapshot: TelegramMessageSnapshot) {
         var displayedMessages = [CustomMessage]()
-        var processedAlbums = Set<TdInt64>()
-        var albumMessageIds = [TdInt64: [Int64]]()
+        // The shared store retains up to 500 messages per chat, while this ChatVM intentionally
+        // displays only its paged window. Scanning the whole retained history here runs on the
+        // main actor and made reopening heavily visited/media-rich chats noticeably stall.
+        let orderedLoadedMessageIds = snapshot.orderedMessageIds.filter(loadedMessageIds.contains)
+        let groups = telegramVisualMessageAlbumGroups(
+            orderedMessageIds: orderedLoadedMessageIds,
+            messages: snapshot.messages,
+        )
 
-        for messageId in snapshot.orderedMessageIds {
-            guard let albumId = snapshot.messages[messageId]?.mediaAlbumId, albumId != 0 else { continue }
-            albumMessageIds[albumId, default: []].append(messageId)
-        }
-
-        for messageId in snapshot.orderedMessageIds {
-            guard let rawMessage = snapshot.messages[messageId] else { continue }
-            if rawMessage.mediaAlbumId == 0 {
-                if let rendered = renderedMessages[messageId] {
-                    if !rendered.album.isEmpty {
-                        rendered.album = []
-                    }
-                    displayedMessages.append(rendered)
-                }
-                continue
-            }
-
-            let albumId = rawMessage.mediaAlbumId
-            guard processedAlbums.insert(albumId).inserted else { continue }
-            guard let messageIds = albumMessageIds[albumId],
-                  messageIds.allSatisfy({ renderedMessages[$0] != nil }),
-                  let representativeId = messageIds.first,
-                  let representative = renderedMessages[representativeId]
+        for group in groups {
+            guard group.messageIds.allSatisfy({ renderedMessages[$0] != nil }),
+                  let representative = renderedMessages[group.representativeMessageId]
             else { continue }
-            let album = messageIds.compactMap { snapshot.messages[$0] }
-            if representative.album.map(\.id) != album.map(\.id) {
-                representative.album = album
+
+            if group.isAlbum {
+                let album = group.messageIds.compactMap { snapshot.messages[$0] }
+                if representative.album.map(\.id) != album.map(\.id) {
+                    representative.album = album
+                }
+                if let caption = album.lazy
+                    .compactMap(telegramMessageFormattedText)
+                    .first(where: { !$0.text.isEmpty })
+                {
+                    representative.formattedText = caption
+                }
+            } else if !representative.album.isEmpty {
+                representative.album = []
             }
             displayedMessages.append(representative)
         }
@@ -299,6 +311,7 @@ extension ChatVM {
         let allMessagesRendered = relevantIds.allSatisfy { renderedMessages[$0] != nil }
         guard allMessagesRendered else { return }
         withAnimation { initialMessagesLoaded = true }
+        refreshDetectedChatLanguage()
     }
 
     @MainActor private func invalidateMessageAndReplies(messageId: Int64, version: UInt64) {
@@ -365,13 +378,16 @@ private func isConversationStatusUpdate(_ update: Update, for chatType: CustomCh
     }
 }
 
+// MARK: - MessageRenderLimiter
+
 actor MessageRenderLimiter {
-    private var availablePermits: Int
-    private var waiters = [CheckedContinuation<Void, Never>]()
+    // MARK: Lifecycle
 
     init(limit: Int) {
-        availablePermits = max(1, limit)
+        self.availablePermits = max(1, limit)
     }
+
+    // MARK: Internal
 
     func acquire() async {
         if availablePermits > 0 {
@@ -390,4 +406,9 @@ actor MessageRenderLimiter {
             waiters.removeFirst().resume()
         }
     }
+
+    // MARK: Private
+
+    private var availablePermits: Int
+    private var waiters = [CheckedContinuation<Void, Never>]()
 }

@@ -1,3 +1,5 @@
+// MacMessageTable.swift
+
 import SwiftUI
 import TDLibKit
 
@@ -7,34 +9,39 @@ import TDLibKit
 /// avoids churn in the project file while removing the NSTableView/NSHostingView bridge that used
 /// to wrap every message row.
 struct MacMessageTable: View {
+    // MARK: Internal
+
     @Bindable var model: MacSessionModel
 
     let chat: ChatListItemState
     let unreadBoundaryMessageId: Int64?
     let shouldFollowLatestMessage: Bool
+
     @Binding var isAtBottom: Bool
 
     var body: some View {
         List(messageRows, selection: $selectedRowId) { row in
             switch row.kind {
-            case let .day(title):
+            case .day(let title):
                 MacMessageDayHeader(title: title)
                     .tag(row.id)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
 
-            case let .unread(count):
+            case .unread(let count):
                 MacUnreadMessagesHeader(count: count)
                     .tag(row.id)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
 
-            case let .message(messageId):
+            case .message(let messageId, let albumMessageIds):
                 if let message = model.messages.messages[messageId] {
                     MacMessageRow(
                         model: model,
                         message: message,
+                        albumMessages: albumMessageIds?.compactMap { model.messages.messages[$0] } ?? [],
                         lastReadOutboxMessageId: chat.lastReadOutboxMessageId,
+                        showsSenderName: chat.kind == .group,
                     )
                     .tag(row.id)
                     .padding(.horizontal, 8)
@@ -77,7 +84,7 @@ struct MacMessageTable: View {
             positionSearchResult(messageId)
         }
         .task(id: selectedRowId) {
-            guard case let .message(messageId) = selectedRowId,
+            guard case .message(let messageId) = selectedRowId,
                   let message = model.messages.messages[messageId]
             else { return }
             await model.loadAvailableReactions(for: message)
@@ -92,18 +99,25 @@ struct MacMessageTable: View {
         }
     }
 
+    // MARK: Private
+
     @State private var historyAnchorMessageId: Int64?
     @State private var hasPositionedInitialMessages = false
     @State private var selectedRowId: MacMessageListRow.ID?
     @State private var scrollPosition = ScrollPosition(idType: MacMessageListRow.ID.self)
 
     private var messageRows: [MacMessageListRow] {
-        var rows: [MacMessageListRow] = []
+        var rows = [MacMessageListRow]()
         rows.reserveCapacity(model.messages.orderedMessageIds.count + 2)
         let calendar = Calendar.autoupdatingCurrent
         var previousMessage: Message?
 
-        for messageId in model.messages.orderedMessageIds {
+        let groups = telegramVisualMessageAlbumGroups(
+            orderedMessageIds: model.messages.orderedMessageIds,
+            messages: model.messages.messages,
+        )
+        for group in groups {
+            let messageId = group.representativeMessageId
             guard let message = model.messages.messages[messageId] else { continue }
 
             let startsNewDay = previousMessage.map {
@@ -121,7 +135,7 @@ struct MacMessageTable: View {
                 )
             }
 
-            if unreadBoundaryMessageId == messageId {
+            if let unreadBoundaryMessageId, group.messageIds.contains(unreadBoundaryMessageId) {
                 rows.append(
                     MacMessageListRow(
                         id: .unread(messageId),
@@ -130,8 +144,11 @@ struct MacMessageTable: View {
                 )
             }
 
-            rows.append(MacMessageListRow(id: .message(messageId), kind: .message(messageId)))
-            previousMessage = message
+            rows.append(MacMessageListRow(
+                id: .message(messageId),
+                kind: .message(messageId, albumMessageIds: group.isAlbum ? group.messageIds : nil),
+            ))
+            previousMessage = group.messageIds.last.flatMap { model.messages.messages[$0] } ?? message
         }
 
         return rows
@@ -148,7 +165,7 @@ struct MacMessageTable: View {
             positionSearchResult(targetMessageId)
         } else if let anchorMessageId = historyAnchorMessageId {
             if model.messages.orderedMessageIds.first != anchorMessageId {
-                scrollPosition.scrollTo(id: MacMessageListRow.ID.message(anchorMessageId), anchor: .top)
+                scrollPosition.scrollTo(id: messageRowID(containing: anchorMessageId), anchor: .top)
                 historyAnchorMessageId = nil
             }
         } else if !model.isLoadingMessages,
@@ -159,13 +176,14 @@ struct MacMessageTable: View {
         } else if shouldFollowLatestMessage,
                   let lastMessageId = model.messages.orderedMessageIds.last
         {
-            scrollPosition.scrollTo(id: MacMessageListRow.ID.message(lastMessageId), anchor: .bottom)
+            scrollPosition.scrollTo(id: messageRowID(containing: lastMessageId), anchor: .bottom)
         }
     }
 
     private func positionSearchResult(_ messageId: Int64) {
-        selectedRowId = .message(messageId)
-        scrollPosition.scrollTo(id: MacMessageListRow.ID.message(messageId), anchor: .center)
+        let rowID = messageRowID(containing: messageId)
+        selectedRowId = rowID
+        scrollPosition.scrollTo(id: rowID, anchor: .center)
         model.navigationTargetMessageId = nil
         hasPositionedInitialMessages = true
     }
@@ -175,18 +193,27 @@ struct MacMessageTable: View {
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
-            scrollPosition.scrollTo(id: MacMessageListRow.ID.message(messageId), anchor: .bottom)
+            scrollPosition.scrollTo(id: messageRowID(containing: messageId), anchor: .bottom)
         }
         hasPositionedInitialMessages = true
         isAtBottom = true
     }
 
     private func positionAtLatestHistory(_ messageId: Int64) {
-        selectedRowId = .message(messageId)
-        scrollPosition.scrollTo(id: MacMessageListRow.ID.message(messageId), anchor: .bottom)
+        let rowID = messageRowID(containing: messageId)
+        selectedRowId = rowID
+        scrollPosition.scrollTo(id: rowID, anchor: .bottom)
         isAtBottom = true
         hasPositionedInitialMessages = true
         model.latestHistoryTargetMessageId = nil
+    }
+
+    private func messageRowID(containing messageId: Int64) -> MacMessageListRow.ID {
+        .message(telegramVisualMessageAlbumRepresentativeId(
+            for: messageId,
+            orderedMessageIds: model.messages.orderedMessageIds,
+            messages: model.messages.messages,
+        ))
     }
 
     private func beginLoadingOlderMessages() {
@@ -219,7 +246,7 @@ private struct MacMessageListRow: Identifiable {
     enum Kind {
         case day(String)
         case unread(Int)
-        case message(Int64)
+        case message(Int64, albumMessageIds: [Int64]?)
     }
 
     let id: ID
@@ -242,8 +269,7 @@ private struct MacMessageDayHeader: View {
             Spacer()
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -251,6 +277,8 @@ private struct MacMessageDayHeader: View {
 // MARK: - MacUnreadMessagesHeader
 
 private struct MacUnreadMessagesHeader: View {
+    // MARK: Internal
+
     let count: Int
 
     var body: some View {
@@ -262,10 +290,11 @@ private struct MacUnreadMessagesHeader: View {
             Divider()
         }
         .frame(height: 24)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
+
+    // MARK: Private
 
     private var title: String {
         "\(count) unread \(count == 1 ? "message" : "messages")"

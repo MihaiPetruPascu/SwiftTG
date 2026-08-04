@@ -5,6 +5,13 @@ import PhotosUI
 import SwiftUI
 import TDLibKit
 
+// MARK: - PresentedChatActionError
+
+private struct PresentedChatActionError: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
 // MARK: - ChatView
 
 struct ChatView: View {
@@ -46,6 +53,12 @@ struct ChatView: View {
             if chatVM.isConversationSearchActive {
                 conversationSearchField
                 Divider()
+            } else if chatVM.showsChatTranslationBanner || chatVM.isChatTranslationEnabled {
+                chatTranslationBanner
+                Divider()
+            } else if chatVM.currentPinnedMessage != nil {
+                pinnedMessageBanner
+                Divider()
             }
 
             ScrollViewReader { scrollViewProxy in
@@ -53,11 +66,11 @@ struct ChatView: View {
                     .task { chatVM.start() }
                     .onAppear {
                         chatVM.scrollViewProxy = scrollViewProxy
-                        positionInitialMessagesIfNeeded(using: scrollViewProxy)
+                        positionInitialMessagesIfNeeded()
                     }
                     .onChange(of: chatVM.initialMessagesLoaded) { _, loaded in
                         guard loaded else { return }
-                        positionInitialMessagesIfNeeded(using: scrollViewProxy)
+                        positionInitialMessagesIfNeeded()
                     }
                     .onChange(of: chatVM.scrollRequestMessageId) { _, messageId in
                         guard let messageId else { return }
@@ -94,7 +107,10 @@ struct ChatView: View {
                 conversationSearchNavigationBar
             } else if !isPreview {
                 if chatVM.customChat.canPostMessages {
-                    ChatBottomArea(focused: $focused)
+                    ChatBottomArea(focused: $focused) {
+                        guard let message = chatVM.messageActionError else { return }
+                        presentedActionError = PresentedChatActionError(message: message)
+                    }
                 } else if chatVM.customChat.kind == .channel {
                     Text("Only channel administrators can post.")
                         .font(.callout)
@@ -107,12 +123,14 @@ struct ChatView: View {
         }
         .background(.black)
         .ignoresSafeArea(.container, edges: .top)
+        .navigationTitle(chatVM.isConversationSearchActive ? "" : chatVM.customChat.chat.title)
         .navigationBarBackButtonHidden(true)
         .dropDestination(for: SelectedImage.self) { items, _ in
             nc.post(name: .localOnSelectedImagesDrop, object: Array(items.prefix(10)))
             return true
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarHeight($navigationBarHeight)
         .onChange(of: chatVM.isConversationSearchActive) { _, isActive in
             if isActive {
@@ -128,25 +146,27 @@ struct ChatView: View {
             chatVM.conversationSearchQueryDidChange()
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: dismiss.callAsFunction) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.backward")
-                        Text(backButtonTitle)
-                        if previousChatTitle == nil, unreadChatCount > 0 {
-                            Text("\(unreadChatCount)")
-                                .font(.caption2.bold())
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 5)
-                                .frame(minWidth: 18, minHeight: 18)
-                                .background(Color.accentColor, in: Capsule())
-                                .accessibilityHidden(true)
+            if !chatVM.isConversationSearchActive {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: dismiss.callAsFunction) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.backward")
+                            Text(backButtonTitle)
+                            if previousChatTitle == nil, unreadChatCount > 0 {
+                                Text("\(unreadChatCount)")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .frame(minWidth: 18, minHeight: 18)
+                                    .background(Color.accentColor, in: Capsule())
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
+                    .accessibilityLabel(backButtonAccessibilityLabel)
                 }
-                .accessibilityLabel(backButtonAccessibilityLabel)
+                ToolbarItem(placement: .principal) { principal }
             }
-            ToolbarItem(placement: .principal) { principal }
         }
         .alert(
             "Can't Open Destination",
@@ -163,12 +183,29 @@ struct ChatView: View {
         } message: {
             Text(chatVM.navigationError ?? "The destination is unavailable.")
         }
+        .onChange(of: chatVM.messageActionError) { _, message in
+            guard let message else { return }
+            presentedActionError = PresentedChatActionError(message: message)
+        }
+        .alert(item: $presentedActionError) { error in
+            Alert(
+                title: Text("Action Failed"),
+                message: Text(error.message),
+                dismissButton: .default(Text("OK")) {
+                    chatVM.messageActionError = nil
+                },
+            )
+        }
         .navigationDestination(isPresented: $showsChatInfo) {
             ChatInfoView()
                 .environment(chatVM)
         }
         .sheet(item: $chatVM.messagePendingForward) { message in
             ForwardChatPickerView(message: message, chatVM: chatVM)
+        }
+        .sheet(isPresented: $showsPinnedMessages) {
+            PinnedMessagesView()
+                .environment(chatVM)
         }
         .environment(chatVM)
     }
@@ -180,7 +217,6 @@ struct ChatView: View {
                     customMessage: customMessage,
                     previousMessage: chatVM.messages[safe: index - 1],
                     nextMessage: chatVM.messages[safe: index + 1],
-                    distanceFromStart: index,
                     shouldShowProfileImage: chatVM.customChat.shouldShowProfileImage,
                     isPreview: isPreview,
                 )
@@ -189,8 +225,11 @@ struct ChatView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 1)
         .listRowSpacing(5)
+        .contentMargins(.bottom, 0, for: .scrollContent)
         .defaultScrollAnchor(.bottom)
+        .scrollPosition($initialScrollPosition)
         .background(.black)
         .scrollDismissesKeyboard(.interactively)
         .scrollBounceBehavior(.always)
@@ -203,15 +242,16 @@ struct ChatView: View {
             guard !isPreview else { return }
             chatVM.updateBottomVisibility(isLastMessageVisible: isAtBottom)
         }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height > geometry.containerSize.height
+                && geometry.visibleRect.minY <= 250
+        } action: { wasNearTop, isNearTop in
+            guard !isPreview, positionedInitialMessages, !wasNearTop, isNearTop else { return }
+            chatVM.loadMessages()
+        }
         .overlay(alignment: .top) {
             LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
                 .frame(height: topGradientHeight)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [.black, .clear], startPoint: .bottom, endPoint: .top)
-                .frame(height: 24)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -258,10 +298,13 @@ struct ChatView: View {
     // MARK: Private
 
     @FocusState private var conversationSearchFocused
+    @State private var initialScrollPosition = ScrollPosition(idType: Int64.self, edge: .bottom)
     @State private var navigationBarHeight = CGFloat.zero
     @State private var positionedInitialMessages = false
     @State private var rootVM = RootVM.shared
     @State private var showsChatInfo = false
+    @State private var showsPinnedMessages = false
+    @State private var presentedActionError: PresentedChatActionError?
 
     private var unreadChatCount: Int {
         rootVM.allChats.lazy.filter(\.hasUnreadMessages).count
@@ -289,6 +332,24 @@ struct ChatView: View {
         UIApplication.safeAreaInsets.top + navigationBarHeight
     }
 
+    private var pinnedMessageSummary: String {
+        guard let message = chatVM.currentPinnedMessage else { return "" }
+        return telegramQuotedMessageExcerpt(telegramMessageContentDescription(message))
+    }
+
+    private var detectedChatLanguageName: String {
+        guard let code = chatVM.detectedChatLanguage else { return "" }
+        return Locale.current.localizedString(forLanguageCode: code) ?? code
+    }
+
+    private var initialUnreadMessageId: Int64? {
+        guard chatVM.initialUnreadCount > 0 else { return nil }
+        return chatVM.messages
+            .first {
+                !$0.message.isOutgoing && $0.id > chatVM.initialLastReadInboxMessageId
+            }?.id
+    }
+
     private var conversationSearchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -313,6 +374,67 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var chatTranslationBanner: some View {
+        HStack(spacing: 8) {
+            if chatVM.isChatTranslationEnabled {
+                Text("Translated from \(detectedChatLanguageName)")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Show Original") {
+                    chatVM.disableChatTranslation()
+                }
+                .font(.subheadline)
+            } else {
+                Text("Translate from \(detectedChatLanguageName)?")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Dismiss", systemImage: "xmark") {
+                    chatVM.dismissChatTranslationSuggestion()
+                }
+                .labelStyle(.iconOnly)
+                Button("Translate") {
+                    chatVM.enableChatTranslation()
+                }
+                .font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private var pinnedMessageBanner: some View {
+        HStack(spacing: 8) {
+            Button {
+                guard let message = chatVM.currentPinnedMessage else { return }
+                chatVM.navigateToMessage(id: message.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pinned Message")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    Text(pinnedMessageSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button("Show All Pinned Messages", systemImage: "chevron.right") {
+                showsPinnedMessages = true
+            }
+            .labelStyle(.iconOnly)
+            .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(.bar)
     }
 
@@ -383,27 +505,48 @@ struct ChatView: View {
         .accessibilityHint("Opens chat information")
     }
 
-    private func positionInitialMessagesIfNeeded(using scrollViewProxy: ScrollViewProxy) {
+    private func positionInitialMessagesIfNeeded() {
         guard chatVM.initialMessagesLoaded, !positionedInitialMessages else { return }
         positionedInitialMessages = true
-        Task { @MainActor in
-            // Allow List to commit the first history snapshot before positioning it.
-            await Task.yield()
-            await Task.yield()
-            guard let targetId = chatVM.initialMessageId ?? chatVM.messages.last?.id else { return }
-            var transaction = Transaction()
-            transaction.animation = nil
-            withTransaction(transaction) {
-                scrollViewProxy.scrollTo(
-                    targetId,
-                    anchor: chatVM.initialMessageId == nil ? .bottom : .center,
-                )
+
+        let focusMessageId: Int64?
+        let highlightsFocusMessage: Bool
+        if let initialMessageId = chatVM.initialMessageId {
+            focusMessageId = initialMessageId
+            highlightsFocusMessage = true
+        } else if let initialUnreadMessageId {
+            focusMessageId = initialUnreadMessageId
+            highlightsFocusMessage = true
+        } else {
+            focusMessageId = chatVM.messages.last?.id
+            highlightsFocusMessage = false
+        }
+
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            if let initialMessageId = chatVM.initialMessageId {
+                initialScrollPosition.scrollTo(id: initialMessageId, anchor: .center)
+            } else if let initialUnreadMessageId {
+                initialScrollPosition.scrollTo(id: initialUnreadMessageId, anchor: .top)
+            } else {
+                initialScrollPosition.scrollTo(edge: .bottom)
             }
-            if chatVM.initialMessageId != nil {
-                chatVM.highlightedMessageId = targetId
-                if chatVM.movesAccessibilityFocusToInitialMessage {
-                    accessibilityFocusedMessageId = targetId
-                }
+        }
+        // Opening a chat leaves VoiceOver's cursor wherever it was before the push (usually the
+        // navigation bar) - the scroll position change above doesn't move it. Explicit jumps
+        // (reply/forward origin) already opt into moving focus via `movesAccessibilityFocusToInitialMessage`;
+        // for a plain chat open there's no such flag to check, so always move focus to wherever we
+        // just scrolled, the same way a sighted user is visually dropped there.
+        guard let focusMessageId, chatVM.initialMessageId == nil || chatVM.movesAccessibilityFocusToInitialMessage
+        else { return }
+        Task { @MainActor in
+            await Task.yield()
+            if highlightsFocusMessage {
+                chatVM.highlightedMessageId = focusMessageId
+            }
+            accessibilityFocusedMessageId = focusMessageId
+            if highlightsFocusMessage {
                 Task.main(delay: 0.8) { chatVM.highlightedMessageId = nil }
             }
         }
@@ -453,12 +596,11 @@ struct ChatView: View {
 /// Keeps per-message observation local so a metadata update does not invalidate
 /// and rebuild the entire chat list.
 private struct ChatMessageListRows: View {
-    @Environment(ChatVM.self) private var chatVM
+    // MARK: Internal
 
     let customMessage: CustomMessage
     let previousMessage: CustomMessage?
     let nextMessage: CustomMessage?
-    let distanceFromStart: Int
     let shouldShowProfileImage: Bool
     let isPreview: Bool
 
@@ -528,8 +670,12 @@ private struct ChatMessageListRows: View {
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .onAppear { chatVM.loadMoreIfNeeded(distanceFromStart: distanceFromStart) }
+        .id(customMessage.id)
     }
+
+    // MARK: Private
+
+    @Environment(ChatVM.self) private var chatVM
 
     private var startsNewDay: Bool {
         guard let previousMessage else { return true }
@@ -565,8 +711,7 @@ private struct MessageDayHeader: View {
             Spacer()
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -592,8 +737,7 @@ private struct UnreadMessagesHeader: View {
                 .frame(height: 1)
         }
         .padding(.vertical, 6)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 

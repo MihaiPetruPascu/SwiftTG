@@ -15,13 +15,14 @@ enum TelegramDrafts {
     static func make(
         formattedText: FormattedText,
         replyMessageId: Int64?,
+        linkPreviewOptions: LinkPreviewOptions? = nil,
         date: Foundation.Date = .now,
     ) -> DraftMessage? {
         guard !formattedText.text.isEmpty || replyMessageId != nil else { return nil }
         return DraftMessage(
             content: .draftMessageContentText(
                 DraftMessageContentText(
-                    linkPreviewOptions: nil,
+                    linkPreviewOptions: linkPreviewOptions,
                     text: formattedText,
                 ),
             ),
@@ -33,10 +34,14 @@ enum TelegramDrafts {
     }
 
     static func text(from draft: DraftMessage?) -> String {
+        formattedText(from: draft)?.text ?? ""
+    }
+
+    static func formattedText(from draft: DraftMessage?) -> FormattedText? {
         guard let draft,
               case .draftMessageContentText(let content) = draft.content
-        else { return "" }
-        return content.text.text
+        else { return nil }
+        return content.text
     }
 
     static func replyMessageId(from draft: DraftMessage?) -> Int64? {
@@ -44,5 +49,9 @@ enum TelegramDrafts {
               case .inputMessageReplyToMessage(let reply) = draft.replyTo
         else { return nil }
         return reply.messageId == 0 ? nil : reply.messageId
+    }
+
+    static func previewDate(draft: DraftMessage?, lastMessage: Message?) -> Int? {
+        draft?.date ?? lastMessage?.date
     }
 }

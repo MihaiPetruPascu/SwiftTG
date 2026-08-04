@@ -2,6 +2,7 @@
 
 import AppKit
 import AVKit
+import QuickLook
 import SwiftUI
 import TDLibKit
 
@@ -13,7 +14,9 @@ struct MacMessageRow: View {
     @Bindable var model: MacSessionModel
 
     let message: Message
+    let albumMessages: [Message]
     let lastReadOutboxMessageId: Int64
+    let showsSenderName: Bool
 
     var body: some View {
         HStack {
@@ -25,6 +28,14 @@ struct MacMessageRow: View {
                     reactionsButton
                 }
                 VStack(alignment: .leading, spacing: 4) {
+                    if showsVisualSenderName, let senderName = model.cachedSenderName(for: message) {
+                        Text(senderName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                            .lineLimit(1)
+                            .accessibilityHidden(true)
+                    }
+
                     if let forwardedFrom = model.messageForwardedFrom[message.id] {
                         if canNavigateToForwardOrigin {
                             Button {
@@ -57,11 +68,25 @@ struct MacMessageRow: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Go to Replied Message")
                     }
-                    if case .messageDocument(let content) = message.content {
+                    if isVisualAlbum {
+                        if albumCaptionShowsAbove, let albumCaption {
+                            MacFormattedTextView(formattedText: albumCaption)
+                        }
+                        MacMediaAlbumView(model: model, messages: albumMessages) { albumMessage in
+                            selectedAlbumMessage = albumMessage
+                        }
+                        if !albumCaptionShowsAbove, let albumCaption {
+                            MacFormattedTextView(formattedText: albumCaption)
+                        }
+                    } else if case .messageDocument(let content) = message.content {
                         MacDocumentMessageContent(
                             content: content,
                             isDownloaded: documentPath != nil,
                             isLoading: isLoadingDocument,
+                            isPaused: documentTransferPhase == .paused,
+                            interactionIsDisabled: documentTransferPhase == .preparingPreview,
+                            transferProgress: documentTransferProgress,
+                            transferStatus: documentTransferLabel,
                             onOpen: openDocument,
                         )
                     } else if case .messagePhoto(let content) = message.content {
@@ -91,6 +116,49 @@ struct MacMessageRow: View {
                             service: model.service,
                             player: audioPlayer,
                         )
+                    } else if case .messageSticker(let content) = message.content {
+                        MacStickerView(
+                            model: model,
+                            content: content,
+                            playsAnimation: message.sendingState == nil,
+                        )
+                    } else if case .messageContact(let content) = message.content {
+                        MacContactMessageContent(content: content, onOpen: activateMessage)
+                    } else if case .messagePoll(let content) = message.content {
+                        TelegramPollView(content: content, message: message, service: model.service) {
+                            Text(content.poll.question.text)
+                                .accessibilityIdentifier("message-\(message.id)")
+                                .accessibilityLabel(pollAccessibilityContextDescription)
+                                .accessibilityActions { messageAccessibilityActions }
+                        }
+                    } else if case .messageChecklist(let content) = message.content {
+                        TelegramChecklistView(
+                            content: content,
+                            message: message,
+                            canMarkTasksAsDone: capabilities?.properties.canMarkTasksAsDone ?? false,
+                            service: model.service,
+                        ) {
+                            Text(content.list.title.text)
+                                .accessibilityIdentifier("message-\(message.id)")
+                                .accessibilityLabel(checklistAccessibilityContextDescription)
+                                .accessibilityActions { messageAccessibilityActions }
+                        }
+                    } else if case .messageText(let content) = message.content {
+                        if let linkPreview = content.linkPreview, linkPreview.showAboveText {
+                            MacLinkPreviewView(model: model, preview: linkPreview)
+                        }
+                        if !content.text.text.isEmpty {
+                            MacFormattedTextView(formattedText: displayedFormattedText ?? content.text)
+                            if showsTranslation {
+                                Text("Translated")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        if let linkPreview = content.linkPreview, !linkPreview.showAboveText {
+                            MacLinkPreviewView(model: model, preview: linkPreview)
+                        }
                     } else if let formattedText = telegramMessageFormattedText(message) {
                         MacFormattedTextView(formattedText: formattedText)
                     } else {
@@ -111,24 +179,39 @@ struct MacMessageRow: View {
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 8)
-                .background(
-                    isServiceMessage
-                        ? Color.secondary.opacity(0.12)
-                        : (message.isOutgoing ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12)),
-                    in: RoundedRectangle(cornerRadius: 12),
-                )
-                .macModified { messageAccessibilityElement($0) }
-                .accessibilityHidden(!messageReactions.isEmpty || !messageLinks.isEmpty)
+                .background {
+                    if !isStickerMessage {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(
+                                isServiceMessage
+                                    ? Color.secondary.opacity(0.12)
+                                    : (message.isOutgoing
+                                        ? Color.accentColor.opacity(0.18)
+                                        : Color.secondary.opacity(0.12)),
+                            )
+                    }
+                }
+                .macModified {
+                    if isPollMessage || isChecklistMessage {
+                        $0
+                    } else if isVisualAlbum {
+                        albumAccessibilityRepresentation($0)
+                    } else {
+                        messageAccessibilityElement($0)
+                    }
+                }
+                .accessibilityHidden(hasAccessibilityGroup)
                 .contextMenu { messageActions }
                 if !message.isOutgoing, !messageReactions.isEmpty {
                     reactionsButton
                 }
             }
             .macModified {
-                if !messageReactions.isEmpty || !messageLinks.isEmpty {
+                if hasAccessibilityGroup {
                     linkAccessibilityGroup($0)
                 } else {
                     $0
@@ -145,7 +228,8 @@ struct MacMessageRow: View {
             voicePath = await model.localVoiceNotePath(fileId: voiceFileId)
         }
         .task(id: presentationTaskID) {
-            guard let photoFileId,
+            guard !isVisualAlbum,
+                  let photoFileId,
                   let path = await model.localPhotoPath(fileId: photoFileId)
             else {
                 photoPath = nil
@@ -156,7 +240,8 @@ struct MacMessageRow: View {
             photoImage = await Self.decodedImage(atPath: path)
         }
         .task(id: presentationTaskID) {
-            guard let videoThumbnailFileId,
+            guard !isVisualAlbum,
+                  let videoThumbnailFileId,
                   let path = await model.localPhotoPath(fileId: videoThumbnailFileId)
             else {
                 videoThumbnailImage = nil
@@ -178,6 +263,13 @@ struct MacMessageRow: View {
         }
         .task(id: presentationTaskID) {
             await model.loadServiceDescription(for: message)
+        }
+        .task(id: presentationTaskID) {
+            model.loadTranslationEligibility(for: message)
+        }
+        .onReceive(model.service.filePublisher(fileId: documentFileId ?? 0)) { file in
+            guard file.id == documentFileId else { return }
+            documentDownloadFile = file
         }
         .confirmationDialog("Delete message?", isPresented: $showDeleteOptions) {
             if capabilities?.properties.canBeDeletedOnlyForSelf == true {
@@ -223,6 +315,9 @@ struct MacMessageRow: View {
                 )
             }
         }
+        .sheet(item: $selectedAlbumMessage) { albumMessage in
+            MacAlbumMediaPreview(model: model, message: albumMessage)
+        }
         .sheet(isPresented: $showReactionDetails) {
             TelegramReactionDetailsView(
                 service: model.service,
@@ -233,13 +328,34 @@ struct MacMessageRow: View {
         .sheet(isPresented: $showForwardPicker) {
             MacForwardChatPicker(model: model, message: message)
         }
+        .quickLookPreview($documentPreviewURL)
     }
 
     // MARK: Private
 
+    /// Actions common to the context menu and VoiceOver's accessibility actions; kept as one list so
+    /// the two presentations (menu buttons with icons vs. plain accessibility actions) can't drift.
+    /// "React" and "Delete" are still special-cased below since each renders differently per surface
+    /// (a reactions submenu vs. a single toggle; a destructive button with a leading divider vs. plain).
+    private enum MacRowAction {
+        case button(title: String, systemImage: String, action: () -> Void)
+        case reactions
+    }
+
+    private enum DocumentTransferPhase: Equatable {
+        case downloading
+        case paused
+        case preparingPreview
+    }
+
     @State private var player = MacVoicePlayer.shared
     @State private var audioPlayer = TelegramAudioPlayer.shared
     @State private var documentPath: String?
+    @State private var documentPreviewURL: URL?
+    @State private var documentDownloadFile: File?
+    @State private var documentTransferPhase: DocumentTransferPhase?
+    @State private var documentTransferID: UUID?
+    @State private var documentDownloadCancellationTask: Task<Void, Never>?
     @State private var isLoadingDocument = false
     @State private var photoImage: NSImage?
     @State private var photoPath: String?
@@ -251,6 +367,7 @@ struct MacMessageRow: View {
     @State private var showPhotoPreview = false
     @State private var showVideoPreview = false
     @State private var showForwardPicker = false
+    @State private var selectedAlbumMessage: Message?
 
     private var capabilities: MacMessageCapabilities? {
         model.messageCapabilities[message.id]
@@ -269,6 +386,25 @@ struct MacMessageRow: View {
         "\(message.id):\(message.editDate)"
     }
 
+    private var isVisualAlbum: Bool {
+        !albumMessages.isEmpty
+    }
+
+    private var albumCaption: FormattedText? {
+        albumMessages.lazy.compactMap(telegramMessageFormattedText).first
+    }
+
+    private var albumCaptionShowsAbove: Bool {
+        guard let captionMessage = albumMessages.first(where: { telegramMessageFormattedText($0) != nil }) else {
+            return false
+        }
+        switch captionMessage.content {
+        case .messagePhoto(let content): return content.showCaptionAboveMedia
+        case .messageVideo(let content): return content.showCaptionAboveMedia
+        default: return false
+        }
+    }
+
     private var canNavigateToForwardOrigin: Bool {
         guard let origin = message.forwardInfo?.origin else { return false }
         if case .messageOriginHiddenUser = origin {
@@ -279,6 +415,23 @@ struct MacMessageRow: View {
 
     private var canCopy: Bool {
         capabilities?.properties.canBeCopied == true && copyableMessageText(message) != nil
+    }
+
+    /// Unlike iOS - where every content type's caption funnels through one shared text render
+    /// site - captions here are rendered inside each `Mac*MessageContent` view individually, so
+    /// swapping in a translation cleanly only works for plain text messages for now. Backed by
+    /// `model.messageTranslationEligibility`, loaded once via `loadTranslationEligibility(for:)`
+    /// rather than computed live here (see that function's doc comment for why).
+    private var canTranslate: Bool {
+        model.messageTranslationEligibility[message.id] ?? false
+    }
+
+    private var showsTranslation: Bool {
+        model.translationShownMessageIds.contains(message.id)
+    }
+
+    private var displayedFormattedText: FormattedText? {
+        showsTranslation ? model.messageTranslations[message.id] : nil
     }
 
     private var canDelete: Bool {
@@ -301,11 +454,22 @@ struct MacMessageRow: View {
         return content.document.document.id
     }
 
+    private var messageContact: MessageContact? {
+        guard case .messageContact(let content) = message.content else { return nil }
+        return content
+    }
+
     private var activationHint: String {
         if voiceFileId != nil || audioFileId != nil {
             return "Press to play or pause"
         }
         if documentFileId != nil {
+            if documentTransferPhase == .downloading {
+                return "Press to pause download"
+            }
+            if documentTransferPhase == .paused {
+                return "Press to resume download"
+            }
             return "Press to open document"
         }
         if photoFileId != nil {
@@ -314,11 +478,50 @@ struct MacMessageRow: View {
         if videoFileId != nil {
             return "Press to play video"
         }
+        if let messageContact {
+            return "Press to \(TelegramContactPresentation(messageContact).hasTelegramAccount ? "message" : "add to contacts")"
+        }
         return ""
     }
 
+    private var documentTransferStatus: String? {
+        guard case .messageDocument(let content) = message.content else { return nil }
+        return switch documentTransferPhase {
+        case .downloading:
+            TelegramFileTransferProgress.downloadStatus(
+                fileName: content.document.fileName,
+                file: documentDownloadFile,
+            )
+        case .paused:
+            "Download paused, \(content.document.fileName)"
+        case .preparingPreview:
+            "Preparing preview for \(content.document.fileName)"
+        case nil:
+            nil
+        }
+    }
+
+    private var documentTransferProgress: Double? {
+        guard documentTransferPhase == .downloading else { return nil }
+        return TelegramFileTransferProgress.fraction(documentDownloadFile)
+    }
+
+    private var documentTransferLabel: String? {
+        switch documentTransferPhase {
+        case .downloading:
+            TelegramFileTransferProgress.downloadLabel(file: documentDownloadFile)
+        case .paused:
+            "Download paused"
+        case .preparingPreview:
+            "Preparing preview"
+        case nil:
+            nil
+        }
+    }
+
     private var hasDefaultActivation: Bool {
-        voiceFileId != nil || audioFileId != nil || documentFileId != nil || photoFileId != nil || videoFileId != nil
+        voiceFileId != nil || audioFileId != nil || documentFileId != nil || photoFileId != nil
+            || videoFileId != nil || messageContact != nil
     }
 
     private var photoFileId: Int? {
@@ -373,65 +576,57 @@ struct MacMessageRow: View {
         model.messageServiceDescriptions[message.id] ?? telegramMessageContentDescription(message)
     }
 
+    private var showsVisualSenderName: Bool {
+        showsSenderName && !message.isOutgoing && !isServiceMessage
+    }
+
     private var isServiceMessage: Bool {
         TelegramServiceMessage.isServiceMessage(message.content)
     }
 
+    private var isStickerMessage: Bool {
+        if case .messageSticker = message.content {
+            true
+        } else {
+            false
+        }
+    }
+
+    private var isPollMessage: Bool {
+        if case .messagePoll = message.content {
+            true
+        } else {
+            false
+        }
+    }
+
+    private var isChecklistMessage: Bool {
+        if case .messageChecklist = message.content {
+            true
+        } else {
+            false
+        }
+    }
+
     private var messageLinks: [TelegramTextLink] {
-        guard let formattedText = telegramMessageFormattedText(message) else { return [] }
+        guard let formattedText = isVisualAlbum ? albumCaption : telegramMessageFormattedText(message) else {
+            return []
+        }
         return TelegramTextFormatting.links(in: formattedText)
     }
 
-    private func linkAccessibilityGroup(_ content: some View) -> some View {
-        content
-            .accessibilityElement(children: .contain)
-            .accessibilityChildren {
-                ForEach(messageLinks) { link in
-                    Link(link.displayedText, destination: link.url)
-                        .macModified {
-                            if let destination = linkAccessibilityDestination(link) {
-                                $0.accessibilityValue(destination)
-                            } else {
-                                $0
-                            }
-                        }
-                }
-                if !messageReactions.isEmpty {
-                    Button("Reactions") { showReactionDetails = true }
-                        .accessibilityValue(telegramReactionDescription(messageReactions) ?? "")
-                }
-            }
-            .accessibilityIdentifier("message-\(message.id)")
-            .accessibilityLabel(accessibilityDescription)
-            .accessibilityRespondsToUserInteraction(true)
-            .modifier(OptionalAccessibilityActivation(
-                isEnabled: hasDefaultActivation,
-                action: activateMessage,
-            ))
-            .accessibilityActions { messageAccessibilityActions }
-            .contextMenu { messageActions }
+    private var separatePreviewAccessibilityLink: TelegramLinkPreviewPresentation? {
+        guard let linkPreview = telegramMessageLinkPreview(message) else { return nil }
+        let presentation = TelegramLinkPreviewPresentation(linkPreview)
+        guard let destination = presentation.url,
+              !messageLinks.contains(where: { telegramURLsReferToSameResource($0.url, destination) })
+        else { return nil }
+        return presentation
     }
 
-    private func messageAccessibilityElement(_ content: some View) -> some View {
-        content
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("message-\(message.id)")
-            .accessibilityLabel(accessibilityDescription)
-            .accessibilityHint(activationHint)
-            .modifier(OptionalAccessibilityActivation(
-                isEnabled: hasDefaultActivation,
-                action: activateMessage,
-            ))
-            .accessibilityActions { messageAccessibilityActions }
-    }
-
-    /// Actions common to the context menu and VoiceOver's accessibility actions; kept as one list so
-    /// the two presentations (menu buttons with icons vs. plain accessibility actions) can't drift.
-    /// "React" and "Delete" are still special-cased below since each renders differently per surface
-    /// (a reactions submenu vs. a single toggle; a destructive button with a leading divider vs. plain).
-    private enum MacRowAction {
-        case button(title: String, systemImage: String, action: () -> Void)
-        case reactions
+    private var hasAccessibilityGroup: Bool {
+        !isPollMessage && !isChecklistMessage &&
+            (!messageReactions.isEmpty || !messageLinks.isEmpty || separatePreviewAccessibilityLink != nil)
     }
 
     private var rowActions: [MacRowAction] {
@@ -462,11 +657,29 @@ struct MacMessageRow: View {
         if canCopy {
             items.append(.button(title: "Copy", systemImage: "doc.on.doc") { copyMessageText() })
         }
-        if photoImage != nil {
+        if canTranslate {
+            items.append(.button(
+                title: model.translationShownMessageIds.contains(message.id) ? "Show Original" : "Translate",
+                systemImage: "character.bubble",
+            ) { model.toggleTranslation(for: message) })
+        }
+        if documentFileId != nil {
+            items.append(.button(title: "Save As…", systemImage: "square.and.arrow.down") {
+                saveDocument()
+            })
+        }
+        if !isVisualAlbum, photoImage != nil {
             items.append(.button(title: "Open Photo", systemImage: "photo") { showPhotoPreview = true })
         }
-        if videoFileId != nil {
+        if !isVisualAlbum, videoFileId != nil {
             items.append(.button(title: "Play Video", systemImage: "play.rectangle") { showVideoPreview = true })
+        }
+        if let messageContact {
+            let presentation = TelegramContactPresentation(messageContact)
+            items.append(.button(
+                title: presentation.hasTelegramAccount ? "Message" : "Add to Contacts",
+                systemImage: presentation.hasTelegramAccount ? "message" : "person.crop.circle.badge.plus",
+            ) { activateMessage() })
         }
         if capabilities?.properties.canBeEdited == true, editableMessageText(message) != nil {
             items.append(.button(title: "Edit", systemImage: "square.and.pencil") { model.beginEditing(message) })
@@ -478,6 +691,53 @@ struct MacMessageRow: View {
             ) { model.togglePin(for: message) })
         }
         return items
+    }
+
+    private var pollAccessibilityContextDescription: String {
+        var parts = [message.isOutgoing ? "You" : model.cachedSenderName(for: message) ?? "Unknown sender"]
+        if case .messagePoll(let content) = message.content {
+            parts.append(content.poll.type.isQuiz ? "Quiz" : "Poll")
+            parts.append(content.poll.question.text)
+        }
+        parts.append(telegramMessageDateDescription(message.date))
+        if let status = telegramMessageDeliveryStatus(
+            message,
+            lastReadOutboxMessageId: lastReadOutboxMessageId,
+        ) {
+            parts.append(status)
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var checklistAccessibilityContextDescription: String {
+        var parts = [message.isOutgoing ? "You" : model.cachedSenderName(for: message) ?? "Unknown sender"]
+        if case .messageChecklist(let content) = message.content {
+            parts.append(TelegramChecklistPresentation(content).contentDescription)
+        }
+        parts.append(telegramMessageDateDescription(message.date))
+        if let status = telegramMessageDeliveryStatus(
+            message,
+            lastReadOutboxMessageId: lastReadOutboxMessageId,
+        ) {
+            parts.append(status)
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var albumAccessibilityDescription: String {
+        var parts = [message.isOutgoing ? "You" : model.cachedSenderName(for: message) ?? "Unknown sender"]
+        parts.append(telegramMediaAlbumAccessibilityDescription(itemCount: albumMessages.count))
+        if let albumCaption {
+            parts.append(albumCaption.text)
+        }
+        parts.append(telegramMessageDateDescription(message.date))
+        if let status = telegramMessageDeliveryStatus(
+            message,
+            lastReadOutboxMessageId: lastReadOutboxMessageId,
+        ) {
+            parts.append(status)
+        }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder private var messageActions: some View {
@@ -524,31 +784,92 @@ struct MacMessageRow: View {
         TelegramMessageReactionsView(reactions: messageReactions) {
             showReactionDetails = true
         }
-        .accessibilityHidden(true)
+        .accessibilityHidden(!isPollMessage && !isChecklistMessage)
         .fixedSize(horizontal: true, vertical: false)
         .layoutPriority(2)
         .contextMenu { messageActions }
     }
 
-    private func copyMessageText() {
-        guard let text = copyableMessageText(message) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+    private func linkAccessibilityGroup(_ content: some View) -> some View {
+        content
+            .accessibilityElement(children: .contain)
+            .accessibilityChildren {
+                ForEach(messageLinks) { link in
+                    Link(link.displayedText, destination: link.url)
+                        .macModified {
+                            if let destination = TelegramTextFormatting.accessibilityDestination(for: link) {
+                                $0.accessibilityValue(destination)
+                            } else {
+                                $0
+                            }
+                        }
+                }
+                if let preview = separatePreviewAccessibilityLink, let destination = preview.url {
+                    Link(preview.accessibilityLinkLabel, destination: destination)
+                }
+                if !messageReactions.isEmpty {
+                    Button("Reactions") { showReactionDetails = true }
+                        .accessibilityValue(telegramReactionDescription(messageReactions) ?? "")
+                }
+            }
+            .accessibilityIdentifier("message-\(message.id)")
+            .accessibilityLabel(accessibilityDescription)
+            .accessibilityRespondsToUserInteraction(true)
+            .modifier(OptionalAccessibilityActivation(
+                isEnabled: hasDefaultActivation,
+                action: activateMessage,
+            ))
+            .accessibilityActions { messageAccessibilityActions }
+            .contextMenu { messageActions }
     }
 
-    private func openDocument() {
-        if let documentPath {
-            NSWorkspace.shared.open(URL(filePath: documentPath))
-            return
-        }
-        guard !isLoadingDocument, let documentFileId else { return }
-        isLoadingDocument = true
-        Task {
-            defer { isLoadingDocument = false }
-            guard let path = await model.localDocumentPath(fileId: documentFileId) else { return }
-            documentPath = path
-            NSWorkspace.shared.open(URL(filePath: path))
-        }
+    private func albumAccessibilityRepresentation(_ content: some View) -> some View {
+        content
+            .accessibilityRepresentation {
+                VStack {
+                    Text("Album message")
+                        .accessibilityIdentifier("message-\(message.id)")
+                        .accessibilityLabel(albumAccessibilityDescription)
+                        .accessibilityRespondsToUserInteraction(true)
+                        .accessibilityActions { messageAccessibilityActions }
+
+                    ForEach(Array(albumMessages.enumerated()), id: \.offset) { index, albumMessage in
+                        Button(albumItemAccessibilityLabel(albumMessage, index: index)) {
+                            selectedAlbumMessage = albumMessage
+                        }
+                    }
+
+                    ForEach(messageLinks) { link in
+                        Link(link.displayedText, destination: link.url)
+                            .macModified {
+                                if let destination = TelegramTextFormatting.accessibilityDestination(for: link) {
+                                    $0.accessibilityValue(destination)
+                                } else {
+                                    $0
+                                }
+                            }
+                    }
+
+                    if !messageReactions.isEmpty {
+                        Button("Reactions") { showReactionDetails = true }
+                            .accessibilityValue(telegramReactionDescription(messageReactions) ?? "")
+                    }
+                }
+            }
+    }
+
+    private func messageAccessibilityElement(_ content: some View) -> some View {
+        content
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("message-\(message.id)")
+            .accessibilityLabel(accessibilityDescription)
+            .accessibilityHint(activationHint)
+            .accessibilityValue(documentTransferStatus ?? "")
+            .modifier(OptionalAccessibilityActivation(
+                isEnabled: hasDefaultActivation,
+                action: activateMessage,
+            ))
+            .accessibilityActions { messageAccessibilityActions }
     }
 
     /// Cold-opening a chat reveals dozens of rows at once, whose photo/thumbnail loads (already
@@ -560,6 +881,143 @@ struct MacMessageRow: View {
         await Task.detached(priority: .userInitiated) {
             NSImage(contentsOfFile: path)
         }.value
+    }
+
+    private func albumItemAccessibilityLabel(_ albumMessage: Message, index: Int) -> String {
+        "Item \(index + 1) of \(albumMessages.count), \(telegramMessageContentDescription(albumMessage))"
+    }
+
+    private func copyMessageText() {
+        guard let text = copyableMessageText(message) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func openDocument() {
+        guard let documentFileId,
+              case .messageDocument(let content) = message.content
+        else { return }
+
+        if documentTransferPhase == .downloading {
+            pauseDocumentDownload(fileId: documentFileId)
+            return
+        }
+        guard documentTransferPhase != .preparingPreview else { return }
+
+        let transferID = UUID()
+        let pendingCancellation = documentDownloadCancellationTask
+        documentDownloadCancellationTask = nil
+        documentTransferID = transferID
+        isLoadingDocument = true
+        model.messageActionError = nil
+        documentTransferPhase = documentPath == nil ? .downloading : .preparingPreview
+        announceDocumentTransferStatus()
+        Task { @MainActor in
+            defer {
+                if documentTransferID == transferID {
+                    documentTransferID = nil
+                    isLoadingDocument = false
+                    documentTransferPhase = nil
+                }
+            }
+            do {
+                await pendingCancellation?.value
+                guard documentTransferID == transferID else { return }
+                let resolvedPath: String
+                if let documentPath {
+                    resolvedPath = documentPath
+                } else if let path = await model.localDocumentPath(
+                    file: content.document.document,
+                    suggestedFileName: content.document.fileName,
+                ) {
+                    guard documentTransferID == transferID else { return }
+                    resolvedPath = path
+                    documentPath = path
+                } else {
+                    guard documentTransferID == transferID else { return }
+                    throw TelegramFileTransferError.sourceUnavailable
+                }
+                if documentTransferPhase != .preparingPreview {
+                    documentTransferPhase = .preparingPreview
+                    announceDocumentTransferStatus(prefix: "Download complete. ")
+                }
+                documentPreviewURL = try await TelegramDocumentExport.previewURL(
+                    sourceURL: URL(filePath: resolvedPath),
+                    suggestedFileName: content.document.fileName,
+                    mimeType: content.document.mimeType,
+                    identifier: String(documentFileId),
+                )
+            } catch {
+                guard !Task.isCancelled, documentTransferID == transferID else { return }
+                model.messageActionError = "File couldn't be previewed: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    private func pauseDocumentDownload(fileId: Int) {
+        documentTransferID = nil
+        isLoadingDocument = false
+        documentTransferPhase = .paused
+        announceDocumentTransferStatus()
+        let service = model.service
+        documentDownloadCancellationTask = Task {
+            _ = try? await service.cancelDownloadFile(
+                fileId: fileId,
+                onlyIfPending: false,
+            )
+        }
+    }
+
+    private func announceDocumentTransferStatus(prefix: String = "") {
+        guard let documentTransferStatus,
+              let window = NSApp.keyWindow ?? NSApp.mainWindow
+        else { return }
+        NSAccessibility.post(
+            element: window,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: prefix + documentTransferStatus,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ],
+        )
+    }
+
+    private func saveDocument() {
+        guard !isLoadingDocument,
+              case .messageDocument(let content) = message.content
+        else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "Save File"
+        panel.prompt = "Save"
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = TelegramDocumentExport.fileName(content.document.fileName)
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        isLoadingDocument = true
+        model.messageActionError = nil
+        Task { @MainActor in
+            defer { isLoadingDocument = false }
+            let resolvedPath: String? =
+                if let documentPath {
+                    documentPath
+                } else {
+                    await model.localDocumentCachePath(fileId: content.document.document.id)
+                }
+            guard let path = resolvedPath else {
+                model.messageActionError = "File couldn't be downloaded."
+                return
+            }
+
+            do {
+                try await TelegramDocumentExport.copyFile(
+                    from: URL(filePath: path),
+                    to: destinationURL,
+                )
+            } catch {
+                model.messageActionError = "File couldn't be saved: \(telegramErrorDescription(error))"
+            }
+        }
     }
 
     private func activateMessage() {
@@ -583,20 +1041,14 @@ struct MacMessageRow: View {
             showPhotoPreview = true
         } else if case .messageVideo = message.content {
             showVideoPreview = true
+        } else if let messageContact {
+            let presentation = TelegramContactPresentation(messageContact)
+            if presentation.hasTelegramAccount {
+                model.navigateToContact(userId: presentation.userId)
+            } else {
+                model.addContact(presentation)
+            }
         }
-    }
-}
-
-private func linkAccessibilityDestination(_ link: TelegramTextLink) -> String? {
-    guard let scheme = link.url.scheme?.lowercased() else { return nil }
-    switch scheme {
-    case "http", "https":
-        guard let host = link.url.host,
-              !link.displayedText.localizedCaseInsensitiveContains(host)
-        else { return nil }
-        return host
-    default:
-        return nil
     }
 }
 
@@ -615,8 +1067,13 @@ private func linkAccessibilityDestination(_ link: TelegramTextLink) -> String? {
         parts.append("Replying to \(replyContext.senderName)")
     }
 
-    let displayedText = model.messageServiceDescriptions[message.id]
-        ?? telegramMessageContentDescription(message)
+    let translatedText = model.translationShownMessageIds.contains(message.id)
+        ? model.messageTranslations[message.id]?.text
+        : nil
+    let contentDescription = translatedText?.isEmpty == false
+        ? translatedText!
+        : telegramMessageContentDescription(message)
+    let displayedText = model.messageServiceDescriptions[message.id] ?? contentDescription
     if TelegramServiceMessage.isServiceMessage(message.content) {
         parts.append(displayedText)
     } else {
@@ -630,6 +1087,9 @@ private func linkAccessibilityDestination(_ link: TelegramTextLink) -> String? {
 
     if let editStatus = telegramMessageEditStatus(message) {
         parts.append(editStatus)
+    }
+    if translatedText?.isEmpty == false {
+        parts.append("Translated")
     }
     parts.append(telegramMessageDateDescription(message.date))
     if let status = telegramMessageDeliveryStatus(

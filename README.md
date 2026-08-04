@@ -17,7 +17,8 @@
 - sending/reading text/photo/voice/album messages
 - replying to/editing messages
 - draft, forwarded from
-- animojis (tgs, webp, sometimes webm)
+- viewing and sending stickers (WebP, animated TGS, and animated WebM)
+- polls and quizzes with creation and voting
 - pinned chats
 - searching your/global chats
 - custom settings sheet
@@ -53,10 +54,6 @@ or [AltStore (suggested)](https://altstore.io).
 <span><img src=".github/images/screenshots/17.png" alt="screenshots/17" width="270px"></span>
 <span><img src=".github/images/screenshots/18.png" alt="screenshots/18" width="270px"></span>
 
-# Important
-
-- Performance with animoji's is terrible, I recommend disabling them in settings
-
 # Contributing
 
 ## Step 1 - Clone the repo
@@ -84,10 +81,16 @@ You need to have [Homebrew](https://brew.sh) installed. \
 Now run these commands:
 
 ```shell
-brew install swift-sh
+brew install swift-sh pkg-config
 sudo chmod +x environment.swift
 sudo chmod +x gyb.sh
 ./environment.swift <api_id> <api_hash>
+./Scripts/build-dependencies.sh
 ```
+
+The dependency script fetches the pinned official rlottie source and builds the
+local FFmpeg XCFramework used for animated stickers. Downloaded sources,
+generated XCFrameworks, and their build caches are intentionally not stored in
+Git.
 
 Everything is set up now! **GL HF**

@@ -21,14 +21,19 @@ struct MacChatRow: View {
                         .font(.body)
                         .fontWeight(chat.hasUnreadMessages ? .semibold : .regular)
                         .lineLimit(1)
+                    if let identityBadge = model.chatIdentityBadges[chat.chatId] ?? nil {
+                        Image(systemName: identityBadge.systemImage)
+                            .font(.caption)
+                            .foregroundStyle(identityBadge.tint)
+                    }
                     Spacer()
                     if let previewDate {
                         Text(
                             Date(timeIntervalSince1970: TimeInterval(previewDate)),
                             format: .dateTime.hour().minute(),
                         )
-                            .font(.caption)
-                            .foregroundStyle(chat.hasUnreadMessages ? Color.accentColor : .secondary)
+                        .font(.caption)
+                        .foregroundStyle(chat.hasUnreadMessages ? Color.accentColor : .secondary)
                     }
                 }
 
@@ -45,7 +50,7 @@ struct MacChatRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     } else {
-                        Text(chat.lastMessage.map(macMessageText) ?? "No messages")
+                        Text(chat.lastMessage.map(telegramChatListMessageDescription) ?? "No messages")
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -78,8 +83,10 @@ struct MacChatRow: View {
         .padding(.vertical, 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Press Return or Space to open this chat")
         .accessibilityActions { chatAccessibilityActions }
+        .task(id: chat.chatId) {
+            await model.loadIdentityBadge(for: chat)
+        }
         .contextMenu { chatActions }
         .confirmationDialog("Mute \(chat.title)", isPresented: $showMuteOptions) {
             ForEach(TelegramMutePreset.allCases) { preset in
@@ -131,33 +138,18 @@ struct MacChatRow: View {
 
     // MARK: Private
 
+    /// Actions common to the context menu and VoiceOver's accessibility actions; kept as one list
+    /// so the two presentations (menu buttons with icons vs. plain accessibility actions) can't
+    /// drift, mirroring the pattern in `MacMessageRow`'s `rowActions`.
+    private enum MacChatRowAction {
+        case button(title: String, systemImage: String, role: ButtonRole? = nil, action: () -> Void)
+        case divider
+    }
+
     @State private var showClearHistoryOptions = false
     @State private var showDeleteOptions = false
     @State private var showLeaveConfirmation = false
     @State private var showMuteOptions = false
-
-    private var chatAvatar: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(avatarColor)
-                .overlay {
-                    Text(String(chat.title.prefix(1)).uppercased())
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-
-            if chat.kind != .privateChat {
-                Image(systemName: chat.kind.systemImage)
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(4)
-                    .background(Color.accentColor, in: Circle())
-                    .overlay(Circle().stroke(.background, lineWidth: 1.5))
-            }
-        }
-        .frame(width: 40, height: 40)
-        .accessibilityHidden(true)
-    }
 
     private var avatarColor: Color {
         let palette: [Color] = [.blue, .indigo, .purple, .pink, .orange, .teal]
@@ -170,6 +162,9 @@ struct MacChatRow: View {
             parts.append(kind)
         }
         parts.append(chat.title)
+        if let identityBadge = model.chatIdentityBadges[chat.chatId] ?? nil {
+            parts.append(identityBadge.accessibilityLabel)
+        }
         if chat.unreadCount > 0 {
             parts.append("\(chat.unreadCount) unread")
         }
@@ -188,7 +183,7 @@ struct MacChatRow: View {
             parts.append(description)
             parts.append(telegramMessageDateDescription(draft.date))
         } else if let lastMessage = chat.lastMessage {
-            parts.append(macMessageText(lastMessage))
+            parts.append(telegramChatListMessageDescription(lastMessage))
             parts.append(telegramMessageDateDescription(lastMessage.date))
         } else {
             parts.append("No messages")
@@ -210,7 +205,7 @@ struct MacChatRow: View {
     }
 
     private var previewDate: Int? {
-        chat.draftMessage?.date ?? chat.lastMessage?.date
+        TelegramDrafts.previewDate(draft: chat.draftMessage, lastMessage: chat.lastMessage)
     }
 
     private var isPinned: Bool {
@@ -219,14 +214,6 @@ struct MacChatRow: View {
 
     private var isArchived: Bool {
         chat.position(in: .chatListArchive) != nil
-    }
-
-    /// Actions common to the context menu and VoiceOver's accessibility actions; kept as one list
-    /// so the two presentations (menu buttons with icons vs. plain accessibility actions) can't
-    /// drift, mirroring the pattern in `MacMessageRow`'s `rowActions`.
-    private enum MacChatRowAction {
-        case button(title: String, systemImage: String, role: ButtonRole? = nil, action: () -> Void)
-        case divider
     }
 
     private var rowActions: [MacChatRowAction] {
@@ -277,7 +264,30 @@ struct MacChatRow: View {
         return items
     }
 
-    @ViewBuilder private var chatActions: some View {
+    private var chatAvatar: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Circle()
+                .fill(avatarColor)
+                .overlay {
+                    Text(String(chat.title.prefix(1)).uppercased())
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+
+            if chat.kind != .privateChat {
+                Image(systemName: chat.kind.systemImage)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(4)
+                    .background(Color.accentColor, in: Circle())
+                    .overlay(Circle().stroke(.background, lineWidth: 1.5))
+            }
+        }
+        .frame(width: 40, height: 40)
+        .accessibilityHidden(true)
+    }
+
+    private var chatActions: some View {
         ForEach(Array(rowActions.enumerated()), id: \.offset) { _, item in
             switch item {
             case .button(let title, let systemImage, let role, let action):

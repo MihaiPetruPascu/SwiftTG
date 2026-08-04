@@ -11,6 +11,10 @@
 		A10000000000000000000001 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000000B /* TDLibKit */; };
 		B3000000000000000000000C /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
 		C40000000000000000000001 /* SwiftOGG in Frameworks */ = {isa = PBXBuildFile; productRef = 69151C5FAB054AB894A93455 /* SwiftOGG */; };
+		D10000000000000000000001 /* RLottieKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000005 /* RLottieKit */; };
+		D10000000000000000000003 /* RLottieKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000005 /* RLottieKit */; };
+		D20000000000000000000001 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
+		D20000000000000000000003 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
 		DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
 		D10000000000000000000002 /* TgVoipWebrtcBetterTGDynamic.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* TgVoipWebrtcBetterTGDynamic.framework */; };
 		D10000000000000000000003 /* TgVoipWebrtcBetterTGDynamic.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* TgVoipWebrtcBetterTGDynamic.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -135,6 +139,8 @@
 			files = (
 				A10000000000000000000001 /* TDLibKit in Frameworks */,
 				C40000000000000000000001 /* SwiftOGG in Frameworks */,
+				D10000000000000000000001 /* RLottieKit in Frameworks */,
+				D20000000000000000000001 /* TelegramWebM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,6 +159,8 @@
 				D10000000000000000000002 /* TgVoipWebrtcBetterTGDynamic.framework in Frameworks */,
 				DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */,
 				29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */,
+				D10000000000000000000003 /* RLottieKit in Frameworks */,
+				D20000000000000000000003 /* TelegramWebM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -206,6 +214,8 @@
 			packageProductDependencies = (
 				A1000000000000000000000B /* TDLibKit */,
 				69151C5FAB054AB894A93455 /* SwiftOGG */,
+				D10000000000000000000005 /* RLottieKit */,
+				D20000000000000000000005 /* TelegramWebM */,
 			);
 			productName = BetterTGMac;
 			productReference = A10000000000000000000002 /* BetterTGMac.app */;
@@ -259,6 +269,8 @@
 			packageProductDependencies = (
 				DF9C5CC0292698BC00ED1CA8 /* TDLibKit */,
 				69151C5FAB054AB894A93455 /* SwiftOGG */,
+				D10000000000000000000005 /* RLottieKit */,
+				D20000000000000000000005 /* TelegramWebM */,
 			);
 			productName = BetterTG;
 			productReference = DF4B997E28C3F3F50087C1B9 /* BetterTG.app */;
@@ -304,6 +316,8 @@
 				DF820B6E28D787AD007DD293 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
 				DF9C5CBF292698BC00ED1CA8 /* XCLocalSwiftPackageReference "TDLibKit" */,
 				A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */,
+				D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */,
+				D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */,
 			);
 			productRefGroup = DF4B997F28C3F3F50087C1B9 /* Products */;
 			projectDirPath = "";
@@ -634,7 +648,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
@@ -692,7 +706,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = BetterTG;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
@@ -771,6 +785,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/RLottieKit;
+		};
+		D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/TelegramFFmpeg;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -804,6 +829,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DF9C5CBF292698BC00ED1CA8 /* XCLocalSwiftPackageReference "TDLibKit" */;
 			productName = TDLibKit;
+		};
+		D10000000000000000000005 /* RLottieKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */;
+			productName = RLottieKit;
+		};
+		D20000000000000000000005 /* TelegramWebM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */;
+			productName = TelegramWebM;
 		};
 		DF9C5CC0292698BC00ED1CA8 /* TDLibKit */ = {
 			isa = XCSwiftPackageProductDependency;

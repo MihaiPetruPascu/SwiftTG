@@ -10,10 +10,10 @@ struct ChatBottomArea: View {
     // MARK: Internal
 
     var focused: FocusState<Bool>.Binding
+    var onAttachmentPreviewDismissed: () -> Void
 
     @Namespace var namespace
     @Environment(ChatVM.self) var chatVM
-    @Environment(\.scenePhase) private var scenePhase
 
     /// Thresholds mirror Telegram's own recording button: drag left to cancel,
     /// drag up to lock into hands-free recording.
@@ -68,19 +68,42 @@ struct ChatBottomArea: View {
             && !chatVM.showDocumentPicker
     }
 
+    var showsTopSide: Bool {
+        if chatVM.editCustomMessage != nil || chatVM.replyMessage != nil {
+            return true
+        }
+        return chatVM.displayedImages.isEmpty
+            && chatVM.displayedDocuments.isEmpty
+            && chatVM.activeLinkPreviewComposer.preview != nil
+    }
+
     var body: some View {
         @Bindable var chatVM = chatVM
-        VStack(spacing: 5) {
-            topSide
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        VStack(spacing: 0) {
+            if showsTopSide {
+                topSide
+                    .padding(.bottom, 5)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 6) {
                 if chatVM.recordingVoiceNote {
                     recordingIndicator
                 } else {
                     leftSide
 
                     textField
+
+                    Button {
+                        showsStickerPicker = true
+                    } label: {
+                        Label("Stickers", systemImage: "face.smiling")
+                            .labelStyle(.iconOnly)
+                    }
+                    .font(.system(size: 22))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .disabled(chatVM.editCustomMessage != nil || chatVM.isSubmittingMessage)
                 }
 
                 rightSide
@@ -91,7 +114,6 @@ struct ChatBottomArea: View {
             guard newPhase != .active else { return }
             Task.background { [chatVM] in await chatVM.updateDraft() }
         }
-        .task(id: chatVM.editCustomMessage) { chatVM.setEditMessageText(from: chatVM.editCustomMessage?.message) }
         .alert("Error", isPresented: $chatVM.errorShown) {
             Text("""
             Access to Microphone isn't granted.
@@ -105,25 +127,89 @@ struct ChatBottomArea: View {
             allowsMultipleSelection: true,
         ) { result in
             guard case .success(let urls) = result else { return }
-            Task { await chatVM.stageDocuments(urls) }
+            Task { @MainActor in await chatVM.stageDocuments(urls) }
         }
-        .sheet(isPresented: Binding(
-            get: { showAttachmentPreview },
-            set: { isPresented in
-                guard !isPresented else { return }
-                withAnimation {
-                    chatVM.displayedImages.removeAll()
-                    chatVM.displayedDocuments.removeAll()
-                }
-            },
-        )) {
+        .sheet(
+            isPresented: Binding(
+                get: { showAttachmentPreview },
+                set: { isPresented in
+                    guard !isPresented else { return }
+                    withAnimation {
+                        chatVM.displayedImages.removeAll()
+                        chatVM.displayedDocuments.removeAll()
+                    }
+                },
+            ),
+            onDismiss: onAttachmentPreviewDismissed,
+        ) {
             AttachmentPreviewView()
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 10)
+        .sheet(isPresented: $showsPollComposer) {
+            TelegramPollComposerView { draft in
+                try await TelegramPollSending.send(
+                    draft: draft,
+                    service: chatVM.service,
+                    chatId: chatVM.customChat.chat.id,
+                    replyToMessageId: chatVM.replyMessage?.id,
+                )
+                chatVM.replyMessage = nil
+                await chatVM.updateDraft()
+            }
+        }
+        .sheet(isPresented: $showsChecklistComposer) {
+            TelegramChecklistComposerView { draft in
+                try await TelegramChecklistSending.send(
+                    draft: draft,
+                    service: chatVM.service,
+                    chatId: chatVM.customChat.chat.id,
+                    replyToMessageId: chatVM.replyMessage?.id,
+                )
+                chatVM.replyMessage = nil
+                await chatVM.updateDraft()
+            }
+        }
+        .sheet(isPresented: $showsContactComposer) {
+            TelegramContactComposerView(
+                service: chatVM.service,
+                deviceContactsAccessIsDenied: PermissionsManager.shared.contactsAuthorizationStatus == .denied,
+                onOpenSettings: {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                },
+                loadDeviceContacts: { await PermissionsManager.shared.fetchDeviceContactsIfAuthorized() },
+            ) { draft in
+                try await TelegramContactSending.send(
+                    draft: draft,
+                    service: chatVM.service,
+                    chatId: chatVM.customChat.chat.id,
+                    replyToMessageId: chatVM.replyMessage?.id,
+                )
+                chatVM.replyMessage = nil
+                await chatVM.updateDraft()
+            }
+        }
+        .sheet(isPresented: $showsStickerPicker) {
+            TelegramStickerPickerView(
+                service: chatVM.service,
+                chatId: chatVM.customChat.chat.id,
+                replyToMessageId: chatVM.replyMessage?.id,
+                onSent: {
+                    chatVM.replyMessage = nil
+                    await chatVM.updateDraft()
+                },
+            ) { sticker in
+                TelegramStickerView(
+                    sticker: sticker,
+                    service: chatVM.service,
+                    maxSide: 76,
+                    playsAnimation: false,
+                )
+            }
+        }
+        .padding(.horizontal, 8)
         .background(.bar)
         .clipShape(.rect(cornerRadius: 15))
-        .padding([.bottom, .horizontal], 5)
+        .padding(.horizontal, 5)
         .overlay(alignment: .bottomTrailing) {
             Circle()
                 .fill(.blue)
@@ -169,6 +255,21 @@ struct ChatBottomArea: View {
             UIAccessibility.post(notification: .announcement, argument: "Recording locked")
         }
         .onChange(of: chatVM.displayedImages) { nc.post(name: .localScrollToLastIfNeeded) }
+        .task(id: chatVM.customChat.chat.id) {
+            pollIsAvailable = false
+            pollIsAvailable = await TelegramPollSending.isAvailable(
+                service: chatVM.service,
+                chatId: chatVM.customChat.chat.id,
+            )
+        }
+        .task {
+            checklistIsAvailable = await TelegramChecklistSending.isAvailable(service: chatVM.service)
+        }
+        .alert("Premium Required", isPresented: $showsChecklistPremiumAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Checklists are a Telegram Premium feature.")
+        }
         .onReceive(nc.publisher(for: .localOnSelectedImagesDrop)) { notification in
             guard let selectedImages = notification.object as? [SelectedImage] else { return }
             withAnimation {
@@ -203,6 +304,39 @@ struct ChatBottomArea: View {
                 } label: {
                     Label("Attach Files", systemImage: "folder")
                 }
+                if pollIsAvailable {
+                    Button {
+                        withAnimation {
+                            chatVM.displayedImages.removeAll()
+                            chatVM.displayedDocuments.removeAll()
+                        }
+                        showsPollComposer = true
+                    } label: {
+                        Label("Poll", systemImage: "chart.bar")
+                    }
+                }
+                Button {
+                    guard checklistIsAvailable else {
+                        showsChecklistPremiumAlert = true
+                        return
+                    }
+                    withAnimation {
+                        chatVM.displayedImages.removeAll()
+                        chatVM.displayedDocuments.removeAll()
+                    }
+                    showsChecklistComposer = true
+                } label: {
+                    Label("Checklist", systemImage: "checklist")
+                }
+                Button {
+                    withAnimation {
+                        chatVM.displayedImages.removeAll()
+                        chatVM.displayedDocuments.removeAll()
+                    }
+                    showsContactComposer = true
+                } label: {
+                    Label("Contact", systemImage: "person.crop.circle")
+                }
             } label: {
                 Label("Attach", systemImage: "paperclip")
                     .labelStyle(.iconOnly)
@@ -211,7 +345,7 @@ struct ChatBottomArea: View {
             }
             .menuOrder(.fixed)
             .disabled(chatVM.editCustomMessage != nil)
-            .frame(width: 44, height: 44)
+            .frame(width: 40, height: 40)
             .sheet(isPresented: $chatVM.showPhotoPickerView) {
                 PhotoPicker { index, image, error in
                     if let image {
@@ -242,6 +376,7 @@ struct ChatBottomArea: View {
         }
         .font(.system(size: 22))
         .foregroundStyle(.white)
+        .disabled(chatVM.isSubmittingMessage)
         .onChange(of: chatVM.text) { withAnimation { chatVM.showDetail = false } }
         .onChange(of: chatVM.editMessageText) { withAnimation { chatVM.showDetail = false } }
         .onChange(of: chatVM.replyMessage) {
@@ -281,7 +416,7 @@ struct ChatBottomArea: View {
             }
         }
         .font(.title2)
-        .frame(width: 44, height: 44)
+        .frame(width: 40, height: 40)
         .contentShape(.rect)
         .transition(.scale)
         .modify {
@@ -301,6 +436,35 @@ struct ChatBottomArea: View {
         .onChange(of: chatVM.displayedImages, chatVM.setShowSendButton)
         .onChange(of: chatVM.displayedDocuments, chatVM.setShowSendButton)
         .onChange(of: chatVM.editCustomMessage, chatVM.setShowSendButton)
+        .disabled(chatVM.isSubmittingMessage)
+        .modify {
+            if chatVM.recordingLocked {
+                $0.contextMenu {
+                    Button("Send Later…", systemImage: "clock") { showsScheduleVoicePicker = true }
+                }
+            } else if chatVM.showSendButton, chatVM.editCustomMessage == nil {
+                $0.contextMenu {
+                    Button("Send Later…", systemImage: "clock") { showsScheduleSendPicker = true }
+                }
+            } else {
+                $0
+            }
+        }
+        .sheet(isPresented: $showsScheduleSendPicker) {
+            ScheduleSendView(allowsSendWhenOnline: chatVM.customChat.user != nil) { schedulingState in
+                chatVM.sendMessageTask?.cancel()
+                chatVM.sendMessageTask = Task.main { await chatVM.sendMessage(schedulingState: schedulingState) }
+            }
+        }
+        .sheet(isPresented: $showsScheduleVoicePicker) {
+            ScheduleSendView(allowsSendWhenOnline: chatVM.customChat.user != nil) { schedulingState in
+                chatVM.mediaStopRecordingVoice(
+                    duration: Int(chatVM.timerCount),
+                    wave: chatVM.wave,
+                    schedulingState: schedulingState,
+                )
+            }
+        }
         .accessibilityElement()
         .accessibilityLabel(
             chatVM.recordingLocked
@@ -331,55 +495,58 @@ struct ChatBottomArea: View {
             // same as a plain tap for sighted users; VoiceOver's "double-tap and hold" reaches
             // voiceRecordingGesture directly instead of this shortcut.
         }
-    }
-
-    @ViewBuilder var topSide: some View {
-        if let editCustomMessage = chatVM.editCustomMessage {
-            replyMessageView(editCustomMessage, type: .edit)
-        } else if let replyMessage = chatVM.replyMessage {
-            replyMessageView(replyMessage, type: .reply)
+        // The context menus above need a long-press VoiceOver users can't reliably perform;
+        // this surfaces the same "Send Later" entry points through the rotor's actions instead.
+        .modify {
+            if chatVM.recordingLocked {
+                $0.accessibilityAction(named: "Send Later") { showsScheduleVoicePicker = true }
+            } else if chatVM.showSendButton, chatVM.editCustomMessage == nil {
+                $0.accessibilityAction(named: "Send Later") { showsScheduleSendPicker = true }
+            } else {
+                $0
+            }
         }
     }
-    
-    @ViewBuilder var textField: some View {
+
+    var topSide: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let editCustomMessage = chatVM.editCustomMessage {
+                replyMessageView(editCustomMessage, type: .edit)
+            } else if let replyMessage = chatVM.replyMessage {
+                replyMessageView(replyMessage, type: .reply)
+            }
+
+            if chatVM.displayedImages.isEmpty,
+               chatVM.displayedDocuments.isEmpty,
+               let preview = chatVM.activeLinkPreviewComposer.preview
+            {
+                linkPreviewAccessory(preview)
+            }
+        }
+    }
+
+    var textField: some View {
         @Bindable var chatVM = chatVM
-        Group {
-            if chatVM.editCustomMessage == nil {
-                MessageTextEditor("Type a message", text: $chatVM.text, onSubmit: submitMessage) { images in
+        let isEditing = chatVM.editCustomMessage != nil
+        return MessageTextEditor(
+            isEditing ? "Edit a message" : "Type a message",
+            text: isEditing ? $chatVM.editMessageText : $chatVM.text,
+            contextID: chatVM.editCustomMessage.map { AnyHashable($0.id) } ?? AnyHashable("composer"),
+            onSubmit: submitMessage,
+            onPasteImages: isEditing
+                ? nil
+                : { images in
                     withAnimation {
                         chatVM.displayedDocuments.removeAll()
                         chatVM.displayedImages.append(contentsOf: images)
                     }
-                }
-            } else {
-                MessageTextEditor(
-                    "Edit a message",
-                    text: $chatVM.editMessageText,
-                    onSubmit: submitMessage,
-                )
-            }
-        }
+                },
+        )
         .focused(focused)
         .lineLimit(10)
         .padding(.horizontal, 5)
         .background(Color.gray6)
         .clipShape(.rect(cornerRadius: 15))
-//        .onReceive(
-//            Just(text)
-//                .throttle(
-//                    for: 2,
-//                    scheduler: DispatchQueue.global(qos: .background),
-//                    latest: true
-//                )
-//        ) { text in
-//            Task.background {
-//                if !text.characters.isEmpty {
-//                    await tdSendChatAction(.chatActionTyping)
-//                } else {
-//                    await tdSendChatAction(.chatActionCancel)
-//                }
-//            }
-//        }
     }
     
     /// Cancel is always tappable (needed for VoiceOver, which never drives the slide gesture);
@@ -420,6 +587,30 @@ struct ChatBottomArea: View {
         .padding(.bottom, 6)
     }
 
+    func linkPreviewAccessory(_ preview: LinkPreview) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            TelegramLinkPreviewView(preview: preview, service: chatVM.service)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Menu("Link Preview Options", systemImage: "ellipsis.circle") {
+                Button(chatVM.activeLinkPreviewComposer.showsAboveText ? "Move Below Text" : "Move Above Text") {
+                    chatVM.activeLinkPreviewComposer.togglePosition()
+                }
+                if preview.hasLargeMedia {
+                    Button(chatVM.activeLinkPreviewComposer.showsLargeMedia ? "Use Small Media" : "Use Large Media") {
+                        chatVM.activeLinkPreviewComposer.toggleMediaSize()
+                    }
+                }
+            }
+            .labelStyle(.iconOnly)
+
+            Button("Remove Link Preview", systemImage: "xmark") {
+                chatVM.activeLinkPreviewComposer.dismiss()
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
     func replyMessageView(_ customMessage: CustomMessage, type: ReplyMessageType) -> some View {
         HStack {
             ReplyMessageView(customMessage: customMessage, type: type, onTap: {
@@ -448,6 +639,18 @@ struct ChatBottomArea: View {
     }
 
     // MARK: Private
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var showsPollComposer = false
+    @State private var showsChecklistComposer = false
+    @State private var showsChecklistPremiumAlert = false
+    @State private var checklistIsAvailable = false
+    @State private var showsContactComposer = false
+    @State private var showsScheduleSendPicker = false
+    @State private var showsScheduleVoicePicker = false
+    @State private var showsStickerPicker = false
+    @State private var pollIsAvailable = false
 
     @State private var hasBegunRecording = false
 

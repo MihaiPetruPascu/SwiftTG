@@ -7,6 +7,19 @@ func telegramMessageContentDescription(_ message: Message) -> String {
     telegramMessageContentDescription(message.content)
 }
 
+/// The chat list only receives TDLib's last message, not every member of its media album.
+/// Match Telegram-iOS by preferring an album caption and otherwise identifying the grouped
+/// media as an album, without guessing an item count that isn't available here.
+func telegramChatListMessageDescription(_ message: Message) -> String {
+    guard message.mediaAlbumId != 0 else {
+        return telegramMessageContentDescription(message)
+    }
+    if let caption = telegramMessageFormattedText(message)?.text, !caption.isEmpty {
+        return caption
+    }
+    return "Album"
+}
+
 func telegramMessageFormattedText(_ message: Message) -> FormattedText? {
     switch message.content {
     case .messageAudio(let content): content.caption.text.isEmpty ? nil : content.caption
@@ -22,7 +35,13 @@ func telegramMessageFormattedText(_ message: Message) -> FormattedText? {
 func telegramMessageContentDescription(_ content: MessageContent) -> String {
     switch content {
     case .messageText(let content):
-        content.text.text
+        if let preview = content.linkPreview {
+            [content.text.text, TelegramLinkPreviewPresentation(preview).accessibilityDescription]
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+        } else {
+            content.text.text
+        }
     case .messagePhoto(let content):
         content.caption.text.isEmpty ? "Photo" : "Photo: \(content.caption.text)"
     case .messageVoiceNote(let content):
@@ -35,6 +54,12 @@ func telegramMessageContentDescription(_ content: MessageContent) -> String {
         content.caption.text.isEmpty
             ? "File: \(content.document.fileName)"
             : "File: \(content.document.fileName), \(content.caption.text)"
+    case .messagePoll(let content):
+        TelegramPollPresentation(content).contentDescription
+    case .messageChecklist(let content):
+        TelegramChecklistPresentation(content).contentDescription
+    case .messageContact(let content):
+        TelegramContactPresentation(content).contentDescription
     case .messageSticker(let content):
         content.sticker.emoji.isEmpty ? "Sticker" : "Sticker \(content.sticker.emoji)"
     case .messageCall:

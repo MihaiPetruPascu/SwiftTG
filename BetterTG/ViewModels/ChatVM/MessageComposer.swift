@@ -12,17 +12,28 @@ import TDLibKit
     init(chatId: Int64, service: any TelegramService, draftMessage: DraftMessage?) {
         self.chatId = chatId
         self.service = service
+        self.linkPreviewComposer = TelegramLinkPreviewComposer(service: service)
+        self.editLinkPreviewComposer = TelegramLinkPreviewComposer(service: service)
         if let draftMessage,
            case .draftMessageContentText(let draftMessageContentText) = draftMessage.content
         {
-            self.text = getAttributedString(from: draftMessageContentText.text)
+            linkPreviewComposer.configure(preview: nil, options: draftMessageContentText.linkPreviewOptions)
+            self.text = getAttributedString(from: draftMessageContentText.text, linkStyle: .composer)
+            linkPreviewComposer.update(text: draftMessageContentText.text)
+        }
+    }
+
+    deinit {
+        for url in displayedDocuments {
+            TelegramOutgoingFileStaging.shared.discard(fileURL: url)
+        }
+        for image in displayedImages {
+            TelegramOutgoingFileStaging.shared.discard(fileURL: image.url)
         }
     }
 
     // MARK: Internal
 
-    var text: AttributedString = ""
-    var editMessageText: AttributedString = ""
     var editCustomMessage: CustomMessage?
     var replyMessage: CustomMessage?
     var showSendButton = false
@@ -32,7 +43,23 @@ import TDLibKit
     var showCameraView = false
     var showDocumentPicker = false
     var showPhotoPickerView = false
+    var isSubmittingMessage = false
     @ObservationIgnored var sendMessageTask: Task<Void, Never>?
+
+    let linkPreviewComposer: TelegramLinkPreviewComposer
+    let editLinkPreviewComposer: TelegramLinkPreviewComposer
+
+    var text: AttributedString = "" {
+        didSet { linkPreviewComposer.update(text: formattedText(from: text)) }
+    }
+
+    var editMessageText: AttributedString = "" {
+        didSet { editLinkPreviewComposer.update(text: formattedText(from: editMessageText)) }
+    }
+
+    var activeLinkPreviewComposer: TelegramLinkPreviewComposer {
+        editCustomMessage == nil ? linkPreviewComposer : editLinkPreviewComposer
+    }
 
     var canEditMessage: Bool {
         guard let editCustomMessage else { return false }
@@ -46,67 +73,151 @@ import TDLibKit
         }
     }
 
-    func sendMessage() async {
+    func sendMessage(schedulingState: MessageSchedulingState? = nil) async throws {
+        let wasEditing = editCustomMessage != nil
+        let submitted: Bool
         if !displayedDocuments.isEmpty {
-            await sendMessageDocuments()
+            try await sendMessageDocuments(schedulingState: schedulingState)
+            submitted = true
         } else if !displayedImages.isEmpty {
-            await sendMessagePhotos()
+            try await sendMessagePhotos(schedulingState: schedulingState)
+            submitted = true
         } else if canEditMessage {
-            await editMessage()
+            submitted = try await editMessage()
         } else if !text.characters.isEmpty {
-            await sendMessageText()
+            try await sendMessageText(schedulingState: schedulingState)
+            submitted = true
         } else {
             return
         }
 
+        guard submitted else { return }
         await main {
             withAnimation {
-                self.displayedImages.removeAll()
-                self.displayedDocuments.removeAll()
-                self.editMessageText = ""
-                self.text = ""
-                self.replyMessage = nil
-                self.editCustomMessage = nil
+                if wasEditing {
+                    self.editMessageText = ""
+                    self.editCustomMessage = nil
+                } else {
+                    self.displayedImages.removeAll()
+                    self.displayedDocuments.removeAll()
+                    self.text = ""
+                    self.replyMessage = nil
+                }
             }
         }
+        await updateDraft()
     }
 
-    func stageDocuments(_ urls: [URL]) async {
-        let stagedURLs = await stageAttachmentURLs(urls)
-        displayedImages.removeAll()
+    @MainActor func stageDocuments(_ urls: [URL]) async throws {
+        var stagedURLs = [URL]()
+        stagedURLs.reserveCapacity(urls.count)
+        do {
+            for sourceURL in urls {
+                let stagedURL = try await TelegramOutgoingFileStaging.shared.stageDocument(
+                    sourceURL: sourceURL,
+                    suggestedFileName: sourceURL.lastPathComponent,
+                    identifier: UUID().uuidString,
+                )
+                stagedURLs.append(stagedURL)
+            }
+        } catch {
+            for stagedURL in stagedURLs {
+                TelegramOutgoingFileStaging.shared.discard(fileURL: stagedURL)
+            }
+            throw error
+        }
+        discardDisplayedDocuments()
+        discardDisplayedImages()
         displayedDocuments = stagedURLs
         setShowSendButton()
     }
 
-    func sendMessageDocuments() async {
+    /// Unlike `stageDocuments(_:)`, adds to whatever's already staged instead of replacing it - for
+    /// picking more files from the attachment review screen, where the existing selection must
+    /// survive.
+    @MainActor func appendStagedDocuments(_ urls: [URL]) async throws {
+        var stagedURLs = [URL]()
+        stagedURLs.reserveCapacity(urls.count)
+        do {
+            for sourceURL in urls {
+                let stagedURL = try await TelegramOutgoingFileStaging.shared.stageDocument(
+                    sourceURL: sourceURL,
+                    suggestedFileName: sourceURL.lastPathComponent,
+                    identifier: UUID().uuidString,
+                )
+                stagedURLs.append(stagedURL)
+            }
+        } catch {
+            for stagedURL in stagedURLs {
+                TelegramOutgoingFileStaging.shared.discard(fileURL: stagedURL)
+            }
+            throw error
+        }
+        displayedDocuments.append(contentsOf: stagedURLs)
+        setShowSendButton()
+    }
+
+    func discardDisplayedDocuments() {
+        for url in displayedDocuments {
+            TelegramOutgoingFileStaging.shared.discard(fileURL: url)
+        }
+        displayedDocuments.removeAll()
+    }
+
+    func discardDisplayedImages() {
+        for image in displayedImages {
+            TelegramOutgoingFileStaging.shared.discard(fileURL: image.url)
+        }
+        displayedImages.removeAll()
+    }
+
+    func sendMessageDocuments(schedulingState: MessageSchedulingState? = nil) async throws {
+        let documentURLs = displayedDocuments
         let caption = await TelegramTextFormatting.addingAutomaticEntities(
             service: service,
             to: FormattedText(entities: getEntities(from: text), text: text.string),
         )
-        let contents = displayedDocuments.map { url in
+        let contents = documentURLs.map { url in
             TelegramMessageSending.documentContent(url: url, caption: caption)
         }
-        _ = try? await TelegramMessageSending.send(
+        try await TelegramMessageSending.send(
             service: service,
             chatId: chatId,
             contents: contents,
             replyTo: getMessageReplyTo(from: replyMessage),
             uploadAction: .chatActionUploadingDocument(.init(progress: 0)),
+            schedulingState: schedulingState,
+            onAccepted: { messages in
+                TelegramOutgoingFileStaging.shared.register(
+                    fileURLs: documentURLs,
+                    chatId: self.chatId,
+                    temporaryMessageIds: messages.map(\.id),
+                )
+            },
         )
     }
 
-    func sendMessagePhotos() async {
+    func sendMessagePhotos(schedulingState: MessageSchedulingState? = nil) async throws {
+        let imageURLs = displayedImages.map(\.url)
         let caption = await TelegramTextFormatting.addingAutomaticEntities(
             service: service,
             to: FormattedText(entities: getEntities(from: text), text: text.string),
         )
         let contents = displayedImages.map { makeInputMessageContent(for: $0.url, caption: caption) }
-        _ = try? await TelegramMessageSending.send(
+        try await TelegramMessageSending.send(
             service: service,
             chatId: chatId,
             contents: contents,
             replyTo: getMessageReplyTo(from: replyMessage),
             uploadAction: .chatActionUploadingPhoto(.init(progress: 0)),
+            schedulingState: schedulingState,
+            onAccepted: { messages in
+                TelegramOutgoingFileStaging.shared.register(
+                    fileURLs: imageURLs,
+                    chatId: self.chatId,
+                    temporaryMessageIds: messages.map(\.id),
+                )
+            },
         )
     }
 
@@ -120,37 +231,51 @@ import TDLibKit
         )
     }
 
-    func sendMessageText() async {
+    func sendMessageText(schedulingState: MessageSchedulingState? = nil) async throws {
         let formattedText = await TelegramTextFormatting.addingAutomaticEntities(
             service: service,
             to: FormattedText(entities: getEntities(from: text), text: text.string),
         )
-        let content = TelegramMessageSending.textContent(formattedText)
-        _ = try? await TelegramMessageSending.send(
+        let content = TelegramMessageSending.textContent(
+            formattedText,
+            linkPreviewOptions: linkPreviewComposer.options,
+        )
+        try await TelegramMessageSending.send(
             service: service,
             chatId: chatId,
             contents: [content],
             replyTo: getMessageReplyTo(from: replyMessage),
+            schedulingState: schedulingState,
         )
     }
 
-    func editMessage() async {
-        guard let message = editCustomMessage?.message else { return }
-        let newText = FormattedText(entities: getEntities(from: editMessageText), text: editMessageText.string)
-        let supported = await TelegramMessageEditing.editMessage(
+    func editMessage() async throws -> Bool {
+        guard let message = editCustomMessage?.message else { return false }
+        let newText = await TelegramTextFormatting.addingAutomaticEntities(
+            service: service,
+            to: formattedText(from: editMessageText),
+        )
+        let supported = try await TelegramMessageEditing.editMessage(
             service: service,
             chatId: chatId,
             messageId: message.id,
             messageContent: message.content,
             newText: newText,
+            linkPreviewOptions: editLinkPreviewComposer.options,
         )
         if !supported {
             log("Unsupported edit message type")
         }
+        return supported
     }
 
-    func sendMessageVoiceNote(url: URL, duration: Int, waveform: Data) async {
-        try? await TelegramVoiceNoteSending.send(
+    func sendMessageVoiceNote(
+        url: URL,
+        duration: Int,
+        waveform: Data,
+        schedulingState: MessageSchedulingState? = nil,
+    ) async throws {
+        try await TelegramVoiceNoteSending.send(
             service: service,
             chatId: chatId,
             url: url,
@@ -161,8 +286,13 @@ import TDLibKit
             duration: duration,
             waveform: waveform,
             replyTo: getMessageReplyTo(from: replyMessage),
+            schedulingState: schedulingState,
         )
-        text = ""
+        await main {
+            self.text = ""
+            self.replyMessage = nil
+        }
+        await updateDraft()
     }
 
     func updateDraft() async {
@@ -172,6 +302,7 @@ import TDLibKit
                 text: text.string,
             ),
             replyMessageId: replyMessage?.id,
+            linkPreviewOptions: linkPreviewComposer.options,
         )
         _ = try? await service.setChatDraftMessage(
             chatId: chatId,
@@ -190,8 +321,15 @@ import TDLibKit
     func setEditMessageText(from message: Message?) {
         withAnimation {
             guard let message, let formattedText = TelegramMessageEditing.editableFormattedText(from: message)
-            else { return }
-            editMessageText = getAttributedString(from: formattedText)
+            else {
+                editLinkPreviewComposer.configure(preview: nil, options: nil)
+                return
+            }
+            editLinkPreviewComposer.configure(
+                preview: telegramMessageLinkPreview(message),
+                options: telegramMessageLinkPreviewOptions(message),
+            )
+            editMessageText = getAttributedString(from: formattedText, linkStyle: .composer)
         }
     }
 
@@ -200,34 +338,14 @@ import TDLibKit
     private let chatId: Int64
     private let service: any TelegramService
 
-    private func getMessageReplyTo(from customMessage: CustomMessage?) -> InputMessageReplyTo? {
-        TelegramMessageSending.replyTo(messageId: customMessage?.message.id)
+    private func formattedText(from attributedString: AttributedString) -> FormattedText {
+        FormattedText(
+            entities: getEntities(from: attributedString),
+            text: attributedString.string,
+        )
     }
 
-    /// Stages each URL under its own UUID-named subdirectory, rather than folding the UUID into
-    /// the file name itself - `documentContent(url:caption:)` uploads using the staged file's own
-    /// name, so a `"<uuid>-original.ext"` staging name would send (and permanently store) that
-    /// prefixed name as the document's file name instead of the original.
-    private func stageAttachmentURLs(_ urls: [URL]) async -> [URL] {
-        await Task.detached(priority: .userInitiated) {
-            urls.compactMap { source -> URL? in
-                let accessed = source.startAccessingSecurityScopedResource()
-                defer {
-                    if accessed {
-                        source.stopAccessingSecurityScopedResource()
-                    }
-                }
-                let destinationDirectory = URL(filePath: NSTemporaryDirectory())
-                    .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-                let destination = destinationDirectory.appending(path: source.lastPathComponent)
-                do {
-                    try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-                    try FileManager.default.copyItem(at: source, to: destination)
-                    return destination
-                } catch {
-                    return nil
-                }
-            }
-        }.value
+    private func getMessageReplyTo(from customMessage: CustomMessage?) -> InputMessageReplyTo? {
+        TelegramMessageSending.replyTo(messageId: customMessage?.message.id)
     }
 }

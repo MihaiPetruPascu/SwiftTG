@@ -3,30 +3,6 @@
 import SwiftUI
 import TDLibKit
 
-// MARK: - ChatInfoData
-
-private struct ChatInfoData {
-    var about: FormattedText?
-    var usernames = [String]()
-    var phoneNumber: String?
-    var birthdate: String?
-    var memberCount: Int?
-    var administratorCount: Int?
-    var restrictedCount: Int?
-    var bannedCount: Int?
-    var commonGroupCount: Int?
-    var commonGroupsUserId: Int64?
-    var isBlocked = false
-    var defaultMuteFor = 0
-    var usesUnofficialApp = false
-    var isBot = false
-    var blockableUserId: Int64?
-    var canBrowseMembers = false
-    var callUserId: Int64?
-    var canBeCalled = false
-    var supportsVideoCalls = false
-}
-
 private enum PrivateCallPhase: Equatable {
     case requesting
     case ringing
@@ -46,7 +22,6 @@ private enum PrivateCallPhase: Equatable {
         }
     }
 }
-
 // MARK: - ChatInfoView
 
 struct ChatInfoView: View {
@@ -122,11 +97,16 @@ struct ChatInfoView: View {
                 break
             }
         }
+        .sheet(isPresented: $showsScheduledMessages) {
+            ScheduledMessagesView()
+        }
         .confirmationDialog("Mute \(chat.chat.title)", isPresented: $showMuteOptions) {
             ForEach(TelegramMutePreset.allCases) { preset in
                 Button(preset.title) { setMuteDuration(preset.duration) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                showMuteOptions = false
+            }
         }
         .alert(
             "Delete \(chat.chat.title)?",
@@ -175,11 +155,12 @@ struct ChatInfoView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var errorMessage: String?
-    @State private var info: ChatInfoData?
+    @State private var info: TelegramChatInfoData?
     @State private var isLoading = true
     @State private var muteOverride: Bool?
     @State private var showDeleteConfirmation = false
     @State private var showMuteOptions = false
+    @State private var showsScheduledMessages = false
     @State private var showsSharedMedia = false
     @State private var showsCall = false
     @State private var activeCallId: Int?
@@ -195,7 +176,7 @@ struct ChatInfoView: View {
         !chatVM.actionStatus.isEmpty ? chatVM.actionStatus : chatVM.onlineStatus
     }
 
-    private func identitySection(_ info: ChatInfoData?) -> some View {
+    private func identitySection(_ info: TelegramChatInfoData?) -> some View {
         Section {
             VStack(spacing: 12) {
                 VStack(spacing: 12) {
@@ -256,7 +237,6 @@ struct ChatInfoView: View {
                             .frame(minWidth: 88, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel(isMuted(info) ? "Unmute notifications" : "Mute notifications")
 
                         Button {
                             openConversationSearch()
@@ -269,7 +249,6 @@ struct ChatInfoView: View {
                             .frame(minWidth: 88, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel("Search in conversation")
                     }
                 }
             }
@@ -417,7 +396,7 @@ struct ChatInfoView: View {
         callPhase = .requesting
     }
 
-    private func sharedContentSection(_ info: ChatInfoData) -> some View {
+    private func sharedContentSection(_ info: TelegramChatInfoData) -> some View {
         Section {
             Button {
                 showsSharedMedia = true
@@ -426,6 +405,13 @@ struct ChatInfoView: View {
             }
             .accessibilityHint("Shows media, files, links, music, and voice messages")
 
+            Button {
+                showsScheduledMessages = true
+            } label: {
+                Label("Scheduled Messages", systemImage: "clock")
+            }
+            .accessibilityHint("Shows messages scheduled to be sent later")
+
             if let commonGroupCount = info.commonGroupCount,
                commonGroupCount > 0,
                let userId = info.commonGroupsUserId
@@ -433,12 +419,11 @@ struct ChatInfoView: View {
                 NavigationLink(value: ChatInfoDestination.commonGroups(userId: userId, count: commonGroupCount)) {
                     LabeledContent("Groups in common", value: commonGroupCount.formatted())
                 }
-                .accessibilityHint("Opens the groups in common")
             }
         }
     }
 
-    @ViewBuilder private func profileInformationSection(_ info: ChatInfoData) -> some View {
+    @ViewBuilder private func profileInformationSection(_ info: TelegramChatInfoData) -> some View {
         if !info.usernames.isEmpty || info.phoneNumber != nil || info.birthdate != nil || info.about != nil {
             Section {
                 if let phoneNumber = info.phoneNumber {
@@ -469,7 +454,7 @@ struct ChatInfoView: View {
         }
     }
 
-    @ViewBuilder private func memberDetailsSection(_ info: ChatInfoData) -> some View {
+    @ViewBuilder private func memberDetailsSection(_ info: TelegramChatInfoData) -> some View {
         if info.memberCount != nil
             || info.administratorCount != nil
             || info.restrictedCount != nil
@@ -482,7 +467,6 @@ struct ChatInfoView: View {
                         NavigationLink(value: ChatInfoDestination.members(.members)) {
                             LabeledContent(title, value: memberCount.formatted())
                         }
-                        .accessibilityHint("Opens the \(title.lowercased()) list")
                     } else {
                         LabeledContent(title, value: memberCount.formatted())
                     }
@@ -492,27 +476,24 @@ struct ChatInfoView: View {
                     NavigationLink(value: ChatInfoDestination.members(.administrators)) {
                         LabeledContent("Administrators", value: administratorCount.formatted())
                     }
-                    .accessibilityHint("Opens the administrators list")
                 }
 
                 if let restrictedCount = info.restrictedCount, restrictedCount > 0 {
                     NavigationLink(value: ChatInfoDestination.members(.restricted)) {
                         LabeledContent("Restricted", value: restrictedCount.formatted())
                     }
-                    .accessibilityHint("Opens the restricted members list")
                 }
 
                 if let bannedCount = info.bannedCount, bannedCount > 0 {
                     NavigationLink(value: ChatInfoDestination.members(.banned)) {
                         LabeledContent("Banned", value: bannedCount.formatted())
                     }
-                    .accessibilityHint("Opens the banned members list")
                 }
             }
         }
     }
 
-    @ViewBuilder private func unofficialAppWarningSection(_ info: ChatInfoData) -> some View {
+    @ViewBuilder private func unofficialAppWarningSection(_ info: TelegramChatInfoData) -> some View {
         if info.usesUnofficialApp {
             Section {
                 Label(
@@ -561,8 +542,6 @@ struct ChatInfoView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isPublicChat ? "Link: \(url.absoluteString)" : "Username: \(username)")
-        .accessibilityHint("Opens the link")
         .contextMenu {
             if copyValue != url.absoluteString {
                 Button("Copy") { UIPasteboard.general.string = copyValue }
@@ -591,7 +570,7 @@ struct ChatInfoView: View {
         }
     }
 
-    @ViewBuilder private func actionsSection(_ info: ChatInfoData) -> some View {
+    @ViewBuilder private func actionsSection(_ info: TelegramChatInfoData) -> some View {
         let policy = chat.actionPolicy
         if info.blockableUserId != nil
             || policy.canLeave
@@ -629,7 +608,7 @@ struct ChatInfoView: View {
         }
     }
 
-    private func isMuted(_ info: ChatInfoData) -> Bool {
+    private func isMuted(_ info: TelegramChatInfoData) -> Bool {
         if let muteOverride {
             return muteOverride
         }
@@ -665,14 +644,14 @@ struct ChatInfoView: View {
         }
     }
 
-    private func blockActionTitle(_ info: ChatInfoData) -> String {
+    private func blockActionTitle(_ info: TelegramChatInfoData) -> String {
         if info.isBot {
             return info.isBlocked ? "Restart Bot" : "Stop Bot"
         }
         return info.isBlocked ? "Unblock User" : "Block User"
     }
 
-    private func profileInformationLabel(_ info: ChatInfoData) -> String {
+    private func profileInformationLabel(_ info: TelegramChatInfoData) -> String {
         if info.isBot {
             return "Bot Info"
         }
@@ -715,113 +694,13 @@ struct ChatInfoView: View {
         defer { isLoading = false }
 
         do {
-            let resolvedChat = try await chatVM.service.getChat(chatId: chat.id)
-            var loaded = ChatInfoData()
-            let scopeSettings = try? await chatVM.service.getScopeNotificationSettings(
-                scope: notificationScope(for: resolvedChat.type),
-            )
-            loaded.defaultMuteFor = scopeSettings?.muteFor ?? 0
-
-            switch resolvedChat.type {
-            case .chatTypePrivate(let value):
-                await populateUserInfo(&loaded, userId: value.userId)
-            case .chatTypeSecret(let value):
-                await populateUserInfo(&loaded, userId: value.userId)
-            case .chatTypeBasicGroup(let value):
-                await populateBasicGroupInfo(&loaded, groupId: value.basicGroupId)
-            case .chatTypeSupergroup(let value):
-                await populateSupergroupInfo(&loaded, groupId: value.supergroupId)
-            }
-
+            let loaded = try await TelegramChatInfoLoader(service: chatVM.service).load(chatId: chat.id)
             guard !Task.isCancelled else { return }
             info = loaded
         } catch {
             guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
             info = nil
-        }
-    }
-
-    private func populateUserInfo(_ info: inout ChatInfoData, userId: Int64) async {
-        guard let user = try? await chatVM.service.getUser(userId: userId) else { return }
-        info.usernames = user.usernames?.activeUsernames ?? []
-        info.phoneNumber = user.phoneNumber.isEmpty ? nil : "+\(user.phoneNumber)"
-
-        let currentUserId = await (try? chatVM.service.getMe())?.id
-        switch user.type {
-        case .userTypeBot:
-            info.isBot = true
-            info.blockableUserId = userId == currentUserId ? nil : userId
-        case .userTypeRegular:
-            info.blockableUserId = userId == currentUserId ? nil : userId
-        case .userTypeDeleted, .userTypeUnknown:
-            break
-        }
-
-        guard let full = try? await chatVM.service.getUserFullInfo(userId: userId) else { return }
-        if let shortDescription = full.botInfo?.shortDescription.nilIfEmpty {
-            info.about = FormattedText(entities: [], text: shortDescription)
-        } else if let bio = full.bio, !bio.text.isEmpty {
-            info.about = bio
-        }
-        info.birthdate = full.birthdate.map(chatInfoBirthdateDescription)
-        info.commonGroupCount = full.groupInCommonCount
-        info.commonGroupsUserId = full.groupInCommonCount > 0 ? userId : nil
-        info.isBlocked = full.blockList == .blockListMain
-        info.usesUnofficialApp = full.usesUnofficialApp
-        info.callUserId = userId
-        info.canBeCalled = full.canBeCalled
-        info.supportsVideoCalls = full.supportsVideoCalls
-    }
-
-    private func populateBasicGroupInfo(_ info: inout ChatInfoData, groupId: Int64) async {
-        guard let group = try? await chatVM.service.getBasicGroup(basicGroupId: groupId) else { return }
-        info.memberCount = group.memberCount
-        info.canBrowseMembers = true
-
-        guard let full = try? await chatVM.service.getBasicGroupFullInfo(basicGroupId: groupId) else { return }
-        info.about = full.description.nilIfEmpty.map { FormattedText(entities: [], text: $0) }
-        info.memberCount = max(group.memberCount, full.members.count)
-        if chatInfoCanManageMembers(group.status) {
-            info.administratorCount = full.members.filter { chatInfoIsAdministrator($0.status) }.count
-        }
-        if chatInfoCanRestrictMembers(group.status) {
-            info.restrictedCount = full.members
-                .filter {
-                    if case .chatMemberStatusRestricted = $0.status {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                .count
-            info.bannedCount = full.members
-                .filter {
-                    if case .chatMemberStatusBanned = $0.status {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                .count
-        }
-    }
-
-    private func populateSupergroupInfo(_ info: inout ChatInfoData, groupId: Int64) async {
-        guard let group = try? await chatVM.service.getSupergroup(supergroupId: groupId) else { return }
-        info.usernames = group.usernames?.activeUsernames ?? []
-        info.memberCount = group.memberCount > 0 ? group.memberCount : nil
-
-        guard let full = try? await chatVM.service.getSupergroupFullInfo(supergroupId: groupId) else { return }
-        info.about = full.description.nilIfEmpty.map { FormattedText(entities: [], text: $0) }
-        info.memberCount = max(group.memberCount, full.memberCount)
-        info.canBrowseMembers = full.canGetMembers
-        if chatInfoCanManageMembers(group.status) {
-            info.administratorCount = full.administratorCount
-        }
-        if chatInfoCanRestrictMembers(group.status) {
-            info.restrictedCount = full.restrictedCount
-            info.bannedCount = full.bannedCount
         }
     }
 
