@@ -40,6 +40,7 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func addChatToList(chatId: Int64?, chatList: ChatList?) async throws -> Ok
     func cancelDownloadFile(fileId: Int?, onlyIfPending: Bool?) async throws -> Ok
     func checkAuthenticationCode(code: String?) async throws -> Ok
+    func checkAuthenticationEmailCode(code: EmailAddressAuthentication?) async throws -> Ok
     func checkAuthenticationPassword(password: String?) async throws -> Ok
     func closeChat(chatId: Int64?) async throws -> Ok
     func acceptCall(callId: Int?, protocol: CallProtocol?) async throws -> Ok
@@ -130,6 +131,9 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         optionId: Int?,
     ) async throws -> PollVoters
     func getRecentStickers(isAttached: Bool?) async throws -> Stickers
+    func getActiveSessions() async throws -> Sessions
+    func terminateSession(sessionId: TdInt64?) async throws -> Ok
+    func terminateAllOtherSessions() async throws -> Ok
     func getStickerSet(setId: TdInt64?) async throws -> StickerSet
     func getStickers(
         chatId: Int64?,
@@ -137,6 +141,7 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         query: String?,
         stickerType: StickerType?,
     ) async throws -> Stickers
+    func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders
     func getLinkPreview(linkPreviewOptions: LinkPreviewOptions?, text: FormattedText?) async throws -> LinkPreview
     func getMe() async throws -> User
     func getScopeNotificationSettings(scope: NotificationSettingsScope?) async throws -> ScopeNotificationSettings
@@ -225,7 +230,14 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         phoneNumber: String?,
         settings: PhoneNumberAuthenticationSettings?,
     ) async throws -> Ok
+    func setAuthenticationEmailAddress(emailAddress: String?) async throws -> Ok
+    func registerUser(disableNotification: Bool?, firstName: String?, lastName: String?) async throws -> Ok
+    func requestQrCodeAuthentication(otherUserIds: [Int64]?) async throws -> Ok
     func setMessageSenderBlockList(blockList: BlockList?, senderId: MessageSender?) async throws -> Ok
+    func setName(firstName: String?, lastName: String?) async throws -> Ok
+    func setBio(bio: String?) async throws -> Ok
+    func setUsername(username: String?) async throws -> Ok
+    func setProfilePhoto(isPublic: Bool?, photo: InputChatPhoto?) async throws -> Ok
     func setOption(name: String?, value: OptionValue?) async throws -> Ok
     func setPollAnswer(chatId: Int64?, messageId: Int64?, optionIds: [Int]?) async throws -> Ok
     func markChecklistTasksAsDone(
@@ -492,6 +504,10 @@ extension TelegramSession: TelegramService {
         try await client.checkAuthenticationCode(code: code)
     }
 
+    func checkAuthenticationEmailCode(code: EmailAddressAuthentication?) async throws -> Ok {
+        try await client.checkAuthenticationEmailCode(code: code)
+    }
+
     func checkAuthenticationPassword(password: String?) async throws -> Ok {
         try await client.checkAuthenticationPassword(password: password)
     }
@@ -718,6 +734,18 @@ extension TelegramSession: TelegramService {
         try await client.getRecentStickers(isAttached: isAttached)
     }
 
+    func getActiveSessions() async throws -> Sessions {
+        try await client.getActiveSessions()
+    }
+
+    func terminateSession(sessionId: TdInt64?) async throws -> Ok {
+        try await client.terminateSession(sessionId: sessionId)
+    }
+
+    func terminateAllOtherSessions() async throws -> Ok {
+        try await client.terminateAllOtherSessions()
+    }
+
     func getStickerSet(setId: TdInt64?) async throws -> StickerSet {
         try await client.getStickerSet(setId: setId)
     }
@@ -734,6 +762,10 @@ extension TelegramSession: TelegramService {
             query: query,
             stickerType: stickerType,
         )
+    }
+
+    func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders {
+        try await client.getBlockedMessageSenders(blockList: blockList, limit: limit, offset: offset)
     }
 
     func getLinkPreview(linkPreviewOptions: LinkPreviewOptions?, text: FormattedText?) async throws -> LinkPreview {
@@ -876,6 +908,22 @@ extension TelegramSession: TelegramService {
         try await client.setMessageSenderBlockList(blockList: blockList, senderId: senderId)
     }
 
+    func setName(firstName: String?, lastName: String?) async throws -> Ok {
+        try await client.setName(firstName: firstName, lastName: lastName)
+    }
+
+    func setBio(bio: String?) async throws -> Ok {
+        try await client.setBio(bio: bio)
+    }
+
+    func setUsername(username: String?) async throws -> Ok {
+        try await client.setUsername(username: username)
+    }
+
+    func setProfilePhoto(isPublic: Bool?, photo: InputChatPhoto?) async throws -> Ok {
+        try await client.setProfilePhoto(isPublic: isPublic, photo: photo)
+    }
+
     func setPollAnswer(chatId: Int64?, messageId: Int64?, optionIds: [Int]?) async throws -> Ok {
         try await client.setPollAnswer(chatId: chatId, messageId: messageId, optionIds: optionIds)
     }
@@ -903,6 +951,22 @@ extension TelegramSession: TelegramService {
         settings: PhoneNumberAuthenticationSettings?,
     ) async throws -> Ok {
         try await client.setAuthenticationPhoneNumber(phoneNumber: phoneNumber, settings: settings)
+    }
+
+    func setAuthenticationEmailAddress(emailAddress: String?) async throws -> Ok {
+        try await client.setAuthenticationEmailAddress(emailAddress: emailAddress)
+    }
+
+    func registerUser(disableNotification: Bool?, firstName: String?, lastName: String?) async throws -> Ok {
+        try await client.registerUser(
+            disableNotification: disableNotification,
+            firstName: firstName,
+            lastName: lastName,
+        )
+    }
+
+    func requestQrCodeAuthentication(otherUserIds: [Int64]?) async throws -> Ok {
+        try await client.requestQrCodeAuthentication(otherUserIds: otherUserIds)
     }
 
     func toggleChatIsMarkedAsUnread(chatId: Int64?, isMarkedAsUnread: Bool?) async throws -> Ok {

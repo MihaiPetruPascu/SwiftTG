@@ -124,7 +124,18 @@ import TDLibKit
         default: nil
         }
     }
-    
+
+    /// TDLib doesn't special-case the chat with yourself at all - `chat.title`/`chat.photo` are
+    /// literally your own name/photo. Every real Telegram client detects and overrides this
+    /// client-side; mirrors that using the same cache the identity-badge self-exclusion uses.
+    @MainActor var isSavedMessages: Bool {
+        telegramIsSavedMessages(entityUserId: user?.id, currentUserId: TelegramCurrentUserCache.shared.userId)
+    }
+
+    @MainActor var displayTitle: String {
+        telegramDisplayTitle(title: chat.title, isSavedMessages: isSavedMessages)
+    }
+
     var supergroup: Supergroup? {
         switch type {
         case .supergroup(let supergroup): supergroup

@@ -155,6 +155,14 @@ struct ChatListItemState: Sendable, Equatable {
         )
     }
 
+    @MainActor var isSavedMessages: Bool {
+        telegramIsSavedMessages(entityUserId: userId, currentUserId: TelegramCurrentUserCache.shared.userId)
+    }
+
+    @MainActor var displayTitle: String {
+        telegramDisplayTitle(title: title, isSavedMessages: isSavedMessages)
+    }
+
     func position(in list: ChatList) -> ChatPosition? {
         positions.first { $0.list == list }
     }

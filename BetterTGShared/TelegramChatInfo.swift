@@ -22,6 +22,11 @@ struct TelegramChatInfoData: Equatable {
     let title: String
     let kind: String
     let photoFileId: Int?
+    /// Whether this is the chat with yourself - `title`/`photoFileId` above already reflect this
+    /// (`"Saved Messages"`, no photo), kept as an explicit flag so views can show a dedicated
+    /// bookmark icon rather than inferring it from a merely-absent photo, which also legitimately
+    /// happens for ordinary contacts with no photo set.
+    let isSavedMessages: Bool
     var about: FormattedText?
     var usernames = [String]()
     var phoneNumber: String?
@@ -123,11 +128,19 @@ struct TelegramChatInfoLoader {
 
     func load(chatId: Int64) async throws -> TelegramChatInfoData {
         let chat = try await service.getChat(chatId: chatId)
+        let currentUserId = await TelegramCurrentUserCache.shared.userId(service: service)
+        let isSavedMessages: Bool =
+            if case .chatTypePrivate(let value) = chat.type {
+                telegramIsSavedMessages(entityUserId: value.userId, currentUserId: currentUserId)
+            } else {
+                false
+            }
         var info = TelegramChatInfoData(
             chatId: chat.id,
-            title: chat.title,
+            title: telegramDisplayTitle(title: chat.title, isSavedMessages: isSavedMessages),
             kind: ChatListItemKind(chat.type).accessibilityTitle ?? "Private chat",
-            photoFileId: chat.photo?.small.id,
+            photoFileId: isSavedMessages ? nil : chat.photo?.small.id,
+            isSavedMessages: isSavedMessages,
         )
         let scope = telegramNotificationScope(for: chat.type)
         info.defaultMuteFor = await (try? service.getScopeNotificationSettings(scope: scope))?.muteFor ?? 0

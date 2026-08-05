@@ -20,9 +20,10 @@ struct ChatsListItemView: View {
             ProfileImageView(
                 photo: chat.photo?.big,
                 minithumbnail: chat.photo?.minithumbnail,
-                title: chat.title,
+                title: customChat.displayTitle,
                 userId: chat.id,
                 fontSize: 30,
+                isSavedMessages: customChat.isSavedMessages,
             )
             .frame(width: 54, height: 54)
             .accessibilityHidden(true)
@@ -36,7 +37,7 @@ struct ChatsListItemView: View {
                             .accessibilityHidden(true)
                     }
 
-                    Text(customChat.chat.title)
+                    Text(customChat.displayTitle)
                         .font(.headline)
                         .fontWeight(customChat.hasUnreadMessages ? .semibold : .regular)
                         .foregroundStyle(.primary)
@@ -55,7 +56,7 @@ struct ChatsListItemView: View {
                         draft: customChat.draftMessage,
                         lastMessage: customChat.lastMessage,
                     ) {
-                        Text(chatListTimestamp(previewDate))
+                        Text(telegramChatListTimestamp(previewDate))
                             .font(.caption)
                             .foregroundStyle(
                                 customChat.hasUnreadMessages
@@ -118,23 +119,15 @@ struct ChatsListItemView: View {
         guard let user = customChat.user, user.id != currentUserId else { return nil }
         return user.identityBadge
     }
-
-    private func chatListTimestamp(_ timestamp: Int) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        if Calendar.autoupdatingCurrent.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
-        }
-        return date.formatted(.dateTime.month(.abbreviated).day())
-    }
 }
 
 extension CustomChat {
-    func accessibilityDescription(identityBadge: TelegramIdentityBadge?) -> String {
+    @MainActor func accessibilityDescription(identityBadge: TelegramIdentityBadge?) -> String {
         var parts: [String] =
             if case .privateChat = kind {
-                [chat.title]
+                [displayTitle]
             } else {
-                [kind.title, chat.title]
+                [kind.title, displayTitle]
             }
 
         if let identityBadge {
