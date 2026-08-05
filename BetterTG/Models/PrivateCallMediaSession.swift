@@ -2,9 +2,22 @@ import AVFoundation
 import Foundation
 import TDLibKit
 import TgVoipWebrtcBetterTGDynamic
+import UIKit
 
 /// Owns the native tgcalls/WebRTC engine for one TDLib private call.
 final class PrivateCallMediaSession: @unchecked Sendable {
+    /// Advertise exactly the implementations registered by the bundled tgcalls
+    /// framework, matching Telegram iOS instead of maintaining a stale list.
+    static var supportedProtocol: CallProtocol {
+        CallProtocol(
+        libraryVersions: OngoingCallThreadLocalContextWebrtc.versions(withIncludeReference: false),
+        maxLayer: Int(OngoingCallThreadLocalContextWebrtc.maxLayer()),
+        minLayer: 65,
+        udpP2p: true,
+        udpReflector: true
+        )
+    }
+
     private final class EngineQueue: NSObject, OngoingCallThreadLocalContextQueueWebrtc {
         private let queue = DispatchQueue(label: "com.mihaipascu.BetterTG.private-call-media", qos: .userInitiated)
         private let key = DispatchSpecificKey<Void>()
@@ -136,6 +149,22 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         }
     }
 
+    func makeIncomingVideoView(
+        completion: @escaping ((UIView & OngoingCallThreadLocalContextWebrtcVideoView)?) -> Void
+    ) {
+        lock.lock()
+        let engine = context
+        lock.unlock()
+
+        guard let engine else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        queue.dispatch {
+            engine.makeIncomingVideoView(completion)
+        }
+    }
+
     func setVideoEnabled(_ isEnabled: Bool) {
         lock.lock()
         let engine = context
@@ -205,6 +234,7 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         try? audio.setActive(true)
         try? audio.overrideOutputAudioPort(.speaker)
     }
+
 
     private static func makeConnections(_ servers: [CallServer]) -> [OngoingCallConnectionDescriptionWebrtc] {
         let telegramIds = servers.compactMap { server -> Int64? in

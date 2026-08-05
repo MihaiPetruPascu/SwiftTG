@@ -29,6 +29,7 @@ import TDLibKit
     private(set) var isVideo = false
     private(set) var phase = Phase.incoming
     var errorMessage: String?
+    var activeMediaSession: PrivateCallMediaSession? { mediaSession }
 
     private let service: any TelegramService
     private var call: Call?
@@ -66,7 +67,10 @@ import TDLibKit
         phase = .accepting
         Task {
             do {
-                _ = try await service.acceptCall(callId: call.id, protocol: Self.supportedProtocol)
+                _ = try await service.acceptCall(
+                    callId: call.id,
+                    protocol: PrivateCallMediaSession.supportedProtocol
+                )
             } catch {
                 errorMessage = error.localizedDescription
                 reset()
@@ -193,11 +197,4 @@ import TDLibKit
         VoIPPushManager.shared.endSystemCall()
     }
 
-    private static let supportedProtocol = CallProtocol(
-        libraryVersions: ["2.7.7", "5.0.0", "9.0.0", "12.0.0"],
-        maxLayer: 92,
-        minLayer: 65,
-        udpP2p: true,
-        udpReflector: true
-    )
 }

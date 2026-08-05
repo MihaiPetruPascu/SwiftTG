@@ -95,7 +95,7 @@ final class TelegramSession: @unchecked Sendable {
     private lazy var internalClient: TDLibClient = manager.createClient { [weak self] data, client in
         guard let self else { return }
         do {
-            let update = try client.decoder.decode(Update.self, from: data)
+            let update = try client.decoder.decode(Update.self, from: normalizedUpdateData(data))
             process(update)
         } catch {
             print("TDLib update decoding failed: \(error)")
@@ -105,6 +105,7 @@ final class TelegramSession: @unchecked Sendable {
     private var configuration: TelegramSessionConfiguration?
     private var isConfiguringParameters = false
     private var isWaitingForParameters = false
+    private var hasEnabledIncomingCalls = false
     private let manager = TDLibClientManager()
     private let stateLock = NSLock()
     private let updateStore = TelegramUpdateStore()
@@ -116,9 +117,40 @@ final class TelegramSession: @unchecked Sendable {
                 isWaitingForParameters = true
                 stateLock.unlock()
                 configureIfReady()
+            } else if case .authorizationStateReady = value.authorizationState {
+                enableIncomingCallsIfNeeded()
             }
         }
         updateStore.publish(update)
+    }
+
+    private func enableIncomingCallsIfNeeded() {
+        stateLock.lock()
+        guard !hasEnabledIncomingCalls else {
+            stateLock.unlock()
+            return
+        }
+        hasEnabledIncomingCalls = true
+        stateLock.unlock()
+
+        Task { [weak self, client] in
+            do {
+                let sessions = try await client.getActiveSessions()
+                guard let current = sessions.sessions.first(where: \.isCurrent) else {
+                    self?.resetIncomingCallsAttempt()
+                    return
+                }
+                if !current.canAcceptCalls {
+                    _ = try await client.toggleSessionCanAcceptCalls(
+                        canAcceptCalls: true,
+                        sessionId: current.id
+                    )
+                }
+            } catch {
+                self?.resetIncomingCallsAttempt()
+                print("Enabling incoming Telegram calls failed: \(error)")
+            }
+        }
     }
 
     private func configureIfReady() {
@@ -163,4 +195,25 @@ final class TelegramSession: @unchecked Sendable {
         isConfiguringParameters = false
         stateLock.unlock()
     }
+
+    private func resetIncomingCallsAttempt() {
+        stateLock.lock()
+        hasEnabledIncomingCalls = false
+        stateLock.unlock()
+    }
+
+    private func normalizedUpdateData(_ data: Data) -> Data {
+        guard let json = String(data: data, encoding: .utf8),
+              json.contains("\"allow_p2p\"") || json.contains("\"udp_p2p\"")
+        else {
+            return data
+        }
+        // JSONDecoder.convertFromSnakeCase preserves a capitalized trailing
+        // acronym (P2P), while TDLibKit generates properties ending in `P2p`.
+        let normalized = json
+            .replacingOccurrences(of: "\"allow_p2p\"", with: "\"allowP2p\"")
+            .replacingOccurrences(of: "\"udp_p2p\"", with: "\"udpP2p\"")
+        return Data(normalized.utf8)
+    }
+
 }

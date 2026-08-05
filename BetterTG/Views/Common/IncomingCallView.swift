@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct IncomingCallView: View {
     let coordinator: IncomingCallCoordinator
@@ -21,12 +22,22 @@ struct IncomingCallView: View {
             )
             .ignoresSafeArea()
 
+            if coordinator.isVideo,
+               let mediaSession = coordinator.activeMediaSession,
+               case .ready = coordinator.phase
+            {
+                RemoteCallVideoView(mediaSession: mediaSession)
+                    .ignoresSafeArea()
+            }
+
             VStack(spacing: 22) {
                 Spacer()
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 136))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .accessibilityHidden(true)
+                if coordinator.activeMediaSession == nil {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 136))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .accessibilityHidden(true)
+                }
 
                 Text(coordinator.callerName)
                     .font(.largeTitle.bold())
@@ -105,20 +116,20 @@ struct IncomingCallView: View {
             }
             .disabled(!isConnected)
 
+            roundButton(
+                title: "Speaker",
+                systemImage: "speaker.wave.2.fill",
+                color: isSpeakerEnabled ? .white : .white.opacity(0.18),
+                foreground: isSpeakerEnabled ? .black : .white
+            ) {
+                isSpeakerEnabled.toggle()
+                coordinator.setSpeakerEnabled(isSpeakerEnabled)
+            }
+            .disabled(!isConnected)
+
             if isCameraEnabled {
                 roundButton(title: "Flip", systemImage: "camera.rotate.fill", color: .white.opacity(0.18)) {
                     coordinator.switchCamera()
-                }
-                .disabled(!isConnected)
-            } else {
-                roundButton(
-                    title: "Speaker",
-                    systemImage: "speaker.wave.2.fill",
-                    color: isSpeakerEnabled ? .white : .white.opacity(0.18),
-                    foreground: isSpeakerEnabled ? .black : .white
-                ) {
-                    isSpeakerEnabled.toggle()
-                    coordinator.setSpeakerEnabled(isSpeakerEnabled)
                 }
                 .disabled(!isConnected)
             }
@@ -155,5 +166,50 @@ struct IncomingCallView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+    }
+}
+
+struct RemoteCallVideoView: UIViewRepresentable {
+    final class Coordinator {
+        var isActive = true
+        weak var renderedView: UIView?
+
+        func invalidate() {
+            isActive = false
+            renderedView?.removeFromSuperview()
+        }
+    }
+
+    let mediaSession: PrivateCallMediaSession
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .black
+        let coordinator = context.coordinator
+
+        mediaSession.makeIncomingVideoView { [weak container, weak coordinator] videoView in
+            guard let container, let coordinator, coordinator.isActive, let videoView else { return }
+            videoView.translatesAutoresizingMaskIntoConstraints = false
+            videoView.updateIsEnabled(true)
+            container.addSubview(videoView)
+            NSLayoutConstraint.activate([
+                videoView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                videoView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                videoView.topAnchor.constraint(equalTo: container.topAnchor),
+                videoView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            coordinator.renderedView = videoView
+        }
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.invalidate()
     }
 }

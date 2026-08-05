@@ -76,6 +76,7 @@ struct ChatInfoView: View {
                 photo: chat.chat.photo,
                 phase: callPhase,
                 isVideo: activeCallIsVideo,
+                mediaSession: callMediaSession,
                 onMuteChanged: { callMediaSession?.setMuted($0) },
                 onSpeakerChanged: { callMediaSession?.setSpeakerEnabled($0) },
                 onVideoChanged: {
@@ -92,7 +93,11 @@ struct ChatInfoView: View {
                 receiveCallUpdate(value.call)
             case .updateNewCallSignalingData(let value):
                 guard value.callId == activeCallId else { return }
-                callMediaSession?.addSignalingData(value.data)
+                if let callMediaSession {
+                    callMediaSession.addSignalingData(value.data)
+                } else {
+                    pendingCallSignalingData.append(value.data)
+                }
             default:
                 break
             }
@@ -169,6 +174,7 @@ struct ChatInfoView: View {
     @State private var callPhase = PrivateCallPhase.requesting
     @State private var callConnectedAt: Foundation.Date?
     @State private var callMediaSession: PrivateCallMediaSession?
+    @State private var pendingCallSignalingData = [Data]()
 
     private var chat: CustomChat { chatVM.customChat }
 
@@ -279,6 +285,7 @@ struct ChatInfoView: View {
     private func beginCall(userId: Int64, isVideo: Bool) {
         callMediaSession?.stop()
         callMediaSession = nil
+        pendingCallSignalingData.removeAll()
         activeCallId = nil
         activeCallUserId = userId
         activeCallIsVideo = isVideo
@@ -291,13 +298,7 @@ struct ChatInfoView: View {
             do {
                 let result = try await chatVM.service.createCall(
                     isVideo: isVideo,
-                    protocol: CallProtocol(
-                        libraryVersions: ["2.7.7", "5.0.0", "9.0.0", "12.0.0"],
-                        maxLayer: 92,
-                        minLayer: 65,
-                        udpP2p: true,
-                        udpReflector: true,
-                    ),
+                    protocol: PrivateCallMediaSession.supportedProtocol,
                     userId: userId,
                 )
                 activeCallId = result.id
@@ -333,6 +334,8 @@ struct ChatInfoView: View {
                     return
                 }
                 callMediaSession = mediaSession
+                pendingCallSignalingData.forEach(mediaSession.addSignalingData)
+                pendingCallSignalingData.removeAll()
             }
             if callConnectedAt == nil { callConnectedAt = Foundation.Date() }
             callPhase = .ready(ready.emojis)
@@ -390,6 +393,7 @@ struct ChatInfoView: View {
         ServiceSoundManager.shared.stopOutgoingCallTone()
         callMediaSession?.stop()
         callMediaSession = nil
+        pendingCallSignalingData.removeAll()
         activeCallId = nil
         activeCallUserId = nil
         callConnectedAt = nil
@@ -740,6 +744,7 @@ private struct PrivateCallView: View {
     let photo: ChatPhotoInfo?
     let phase: PrivateCallPhase
     let isVideo: Bool
+    let mediaSession: PrivateCallMediaSession?
     let onMuteChanged: (Bool) -> Void
     let onSpeakerChanged: (Bool) -> Void
     let onVideoChanged: (Bool) -> Void
@@ -755,6 +760,7 @@ private struct PrivateCallView: View {
         photo: ChatPhotoInfo?,
         phase: PrivateCallPhase,
         isVideo: Bool,
+        mediaSession: PrivateCallMediaSession?,
         onMuteChanged: @escaping (Bool) -> Void,
         onSpeakerChanged: @escaping (Bool) -> Void,
         onVideoChanged: @escaping (Bool) -> Void,
@@ -765,6 +771,7 @@ private struct PrivateCallView: View {
         self.photo = photo
         self.phase = phase
         self.isVideo = isVideo
+        self.mediaSession = mediaSession
         self.onMuteChanged = onMuteChanged
         self.onSpeakerChanged = onSpeakerChanged
         self.onVideoChanged = onVideoChanged
@@ -787,19 +794,26 @@ private struct PrivateCallView: View {
             )
             .ignoresSafeArea()
 
+            if isVideo, let mediaSession, case .ready = phase {
+                RemoteCallVideoView(mediaSession: mediaSession)
+                    .ignoresSafeArea()
+            }
+
             VStack(spacing: 22) {
                 Spacer()
 
-                ProfileImageView(
-                    photo: photo?.big,
-                    minithumbnail: photo?.minithumbnail,
-                    title: title,
-                    userId: Int64(title.hashValue),
-                    fontSize: 52,
-                )
-                .frame(width: 144, height: 144)
-                .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 3))
-                .shadow(radius: 24)
+                if !isVideo || mediaSession == nil {
+                    ProfileImageView(
+                        photo: photo?.big,
+                        minithumbnail: photo?.minithumbnail,
+                        title: title,
+                        userId: Int64(title.hashValue),
+                        fontSize: 52,
+                    )
+                    .frame(width: 144, height: 144)
+                    .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 3))
+                    .shadow(radius: 24)
+                }
 
                 Text(title)
                     .font(.largeTitle.bold())
@@ -828,6 +842,8 @@ private struct PrivateCallView: View {
                 cameraButton(size: 60)
                 muteButton(size: 60)
 
+                speakerButton(size: 60)
+
                 if isCameraEnabled {
                     callControlButton(
                         title: "Flip",
@@ -837,8 +853,6 @@ private struct PrivateCallView: View {
                         action: onSwitchCamera
                     )
                     .disabled(!controlsEnabled)
-                } else {
-                    speakerButton(size: 60)
                 }
 
                 endCallButton(size: 60)
