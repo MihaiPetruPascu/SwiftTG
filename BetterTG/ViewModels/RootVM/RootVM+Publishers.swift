@@ -59,22 +59,20 @@ extension RootVM {
                 return
             }
 
-            var chatIds = Set<Int64>()
             var didLoadAnyList = false
-            for list in [ChatList.chatListMain, .chatListArchive] {
-                if let ids = try? await service.getChats(chatList: list, limit: 200).chatIds {
+            // `getChats` delivers the corresponding Chat objects through TDLib's
+            // update stream before returning their ids. Fetching every id again
+            // with `getChat` duplicated hundreds of requests and saturated the
+            // process during launch, which was especially disruptive to VoiceOver.
+            for (list, limit) in [(ChatList.chatListMain, 50), (.chatListArchive, 20)] {
+                if (try? await service.getChats(chatList: list, limit: limit)) != nil {
                     didLoadAnyList = true
-                    chatIds.formUnion(ids)
                 }
             }
             guard didLoadAnyList else {
                 await main { self.chatListBootstrapTask = nil }
                 return
             }
-            let chats = await Array(chatIds).asyncCompactMap { chatId in
-                try? await service.getChat(chatId: chatId)
-            }
-            service.mergeChatListChats(chats)
             await main {
                 self.didBootstrapChatLists = true
                 self.chatListBootstrapTask = nil
@@ -187,7 +185,7 @@ extension RootVM {
 
         let removedIds = currentIds.subtracting(snapshotIds)
         if !removedIds.isEmpty {
-            withAnimation { folder.chats.removeAll { removedIds.contains($0.id) } }
+            folder.chats.removeAll { removedIds.contains($0.id) }
         }
 
         let addedIds = snapshotIds.subtracting(currentIds)
@@ -203,7 +201,7 @@ extension RootVM {
                           !folder.chats.contains(where: { $0.id == chatId }),
                           let chat
                     else { return }
-                    withAnimation { folder.chats.append(chat) }
+                    folder.chats.append(chat)
                     if let item = self.latestChatListSnapshot.items[chatId],
                        let position = item.position(in: list)
                     {
@@ -230,16 +228,14 @@ extension RootVM {
             || (item.notificationSettings.map { $0 != chat.notificationSettings } ?? false)
         else { return }
 
-        withAnimation {
-            chat.position = position
-            chat.unreadCount = item.unreadCount
-            chat.lastReadInboxMessageId = item.lastReadInboxMessageId
-            chat.isMarkedAsUnread = item.isMarkedAsUnread
-            chat.draftMessage = item.draftMessage
-            chat.lastMessage = item.lastMessage
-            if let notificationSettings = item.notificationSettings {
-                chat.notificationSettings = notificationSettings
-            }
+        chat.position = position
+        chat.unreadCount = item.unreadCount
+        chat.lastReadInboxMessageId = item.lastReadInboxMessageId
+        chat.isMarkedAsUnread = item.isMarkedAsUnread
+        chat.draftMessage = item.draftMessage
+        chat.lastMessage = item.lastMessage
+        if let notificationSettings = item.notificationSettings {
+            chat.notificationSettings = notificationSettings
         }
 
         guard lastMessageChanged else { return }

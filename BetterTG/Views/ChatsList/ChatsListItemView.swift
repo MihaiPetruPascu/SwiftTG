@@ -104,19 +104,19 @@ struct ChatsListItemView: View {
         .padding(.vertical, 9)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 12)
-        .accessibilityElement(children: .combine)
+        // The row already supplies a complete spoken description. Ignoring the
+        // child semantics avoids building and then discarding a large duplicate
+        // accessibility subtree for every chat in the list.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
-        .task {
-            currentUserId = await TelegramCurrentUserCache.shared.userId(service: RootVM.shared.service)
-        }
     }
 
     // MARK: Private
 
-    @State private var currentUserId: Int64?
-
     private var identityBadge: TelegramIdentityBadge? {
-        guard let user = customChat.user, user.id != currentUserId else { return nil }
+        guard let user = customChat.user,
+              user.id != TelegramCurrentUserCache.shared.userId
+        else { return nil }
         return user.identityBadge
     }
 }
