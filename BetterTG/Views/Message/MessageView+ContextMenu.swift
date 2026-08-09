@@ -219,6 +219,14 @@ extension MessageView {
         }
     }
 
+    func activateLocation() {
+        guard let presentation = customMessage.locationPresentation else { return }
+        let latitude = presentation.location.latitude
+        let longitude = presentation.location.longitude
+        guard let url = URL(string: "http://maps.apple.com/?ll=\(latitude),\(longitude)") else { return }
+        UIApplication.shared.open(url)
+    }
+
     func addSharedContact(_ presentation: TelegramContactPresentation) {
         guard !isAddingContact else { return }
         isAddingContact = true

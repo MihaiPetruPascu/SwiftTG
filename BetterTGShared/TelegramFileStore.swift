@@ -2,11 +2,14 @@
 
 import Combine
 import Foundation
-import TDLibKit
+@preconcurrency import TDLibKit
 
 final class TelegramFileStore: @unchecked Sendable {
     // MARK: Internal
 
+    /// Delivered on the main thread - `subject` is written from `queue` (the store's private
+    /// background queue), but every consumer is a SwiftUI `.onReceive`/`@Observable` update,
+    /// which requires the main thread.
     func publisher(fileId: Int) -> AnyPublisher<File, Never> {
         queue.sync {
             let subject: CurrentValueSubject<File?, Never>
@@ -16,7 +19,7 @@ final class TelegramFileStore: @unchecked Sendable {
                 subject = CurrentValueSubject(files[fileId])
                 subjects[fileId] = subject
             }
-            return subject.compactMap(\.self).eraseToAnyPublisher()
+            return subject.compactMap(\.self).receive(on: DispatchQueue.main).eraseToAnyPublisher()
         }
     }
 
@@ -38,7 +41,7 @@ final class TelegramFileStore: @unchecked Sendable {
 
     // MARK: Private
 
-    private let queue = DispatchQueue(label: "com.gruiachiscop.BetterTG.telegram-files")
+    private let queue = DispatchQueue(label: "com.mihaipascu.BetterTG.telegram-files")
     private var files = [Int: File]()
     private var subjects = [Int: CurrentValueSubject<File?, Never>]()
 

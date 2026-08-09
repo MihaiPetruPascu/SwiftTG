@@ -6,6 +6,8 @@ import SwiftUI
 import TDLibKit
 import UniformTypeIdentifiers
 
+// MARK: - ChatBottomArea
+
 struct ChatBottomArea: View {
     // MARK: Internal
 
@@ -117,7 +119,7 @@ struct ChatBottomArea: View {
         .alert("Error", isPresented: $chatVM.errorShown) {
             Text("""
             Access to Microphone isn't granted.
-            Go to Settings -> BetterTG -> Microphone
+            Go to Settings -> SwiftTG -> Microphone
             if you want to record Voice
             """)
         }
@@ -187,6 +189,28 @@ struct ChatBottomArea: View {
                 chatVM.replyMessage = nil
                 await chatVM.updateDraft()
             }
+        }
+        .sheet(isPresented: $showsLocationComposer) {
+            TelegramLocationComposerView(
+                requestCurrentLocation: { try await PermissionsManager.shared.requestCurrentLocation() },
+                onOpenSettings: {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                },
+                onSend: { draft in
+                    try await TelegramLocationSending.send(
+                        draft: draft,
+                        service: chatVM.service,
+                        chatId: chatVM.customChat.chat.id,
+                        replyToMessageId: chatVM.replyMessage?.id,
+                    )
+                    chatVM.replyMessage = nil
+                    await chatVM.updateDraft()
+                },
+                onShareLiveLocation: { livePeriod in
+                    try await shareLiveLocation(livePeriod: livePeriod)
+                },
+            )
         }
         .sheet(isPresented: $showsStickerPicker) {
             TelegramStickerPickerView(
@@ -337,6 +361,15 @@ struct ChatBottomArea: View {
                 } label: {
                     Label("Contact", systemImage: "person.crop.circle")
                 }
+                Button {
+                    withAnimation {
+                        chatVM.displayedImages.removeAll()
+                        chatVM.displayedDocuments.removeAll()
+                    }
+                    showsLocationComposer = true
+                } label: {
+                    Label("Location", systemImage: "location")
+                }
             } label: {
                 Label("Attach", systemImage: "paperclip")
                     .labelStyle(.iconOnly)
@@ -476,13 +509,6 @@ struct ChatBottomArea: View {
         // placeholder, but offering "Record Voice Message" here would be redundant/confusing
         // alongside the recording indicator's Cancel action and the lock circle's Send action.
         .accessibilityHidden(chatVM.recordingVoiceNote && !chatVM.recordingLocked)
-        .modify {
-            if !chatVM.recordingLocked, !chatVM.showSendButton {
-                $0.accessibilityHint("Double-tap and hold to record a voice message")
-            } else {
-                $0
-            }
-        }
         .accessibilityAction {
             if chatVM.recordingLocked {
                 chatVM.mediaStopRecordingVoice(duration: Int(chatVM.timerCount), wave: chatVM.wave)
@@ -647,6 +673,7 @@ struct ChatBottomArea: View {
     @State private var showsChecklistPremiumAlert = false
     @State private var checklistIsAvailable = false
     @State private var showsContactComposer = false
+    @State private var showsLocationComposer = false
     @State private var showsScheduleSendPicker = false
     @State private var showsScheduleVoicePicker = false
     @State private var showsStickerPicker = false
@@ -662,5 +689,64 @@ struct ChatBottomArea: View {
     private func submitMessage() {
         chatVM.sendMessageTask?.cancel()
         chatVM.sendMessageTask = Task.main { await chatVM.sendMessage() }
+    }
+
+    private func shareLiveLocation(livePeriod: Int) async throws {
+        guard await PermissionsManager.shared.requestAlwaysAuthorization() else {
+            throw TelegramLiveLocationSharingError.alwaysAccessDenied
+        }
+        let location = try await PermissionsManager.shared.requestCurrentLocation()
+        let heading = location.course >= 0 ? Int(location.course.rounded()) : 0
+        let content = InputMessageContent.inputMessageLiveLocation(.init(location: LiveLocation(
+            heading: heading,
+            livePeriod: livePeriod,
+            location: Location(
+                horizontalAccuracy: max(location.horizontalAccuracy, 0),
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude,
+            ),
+            proximityAlertRadius: 0,
+        )))
+        let service = chatVM.service
+        let chatId = chatVM.customChat.chat.id
+        let messages = try await TelegramMessageSending.send(
+            service: service,
+            chatId: chatId,
+            contents: [content],
+            replyTo: TelegramMessageSending.replyTo(messageId: chatVM.replyMessage?.id),
+            onAccepted: { messages in
+                service.mergeMessages(chatId: chatId, messages: messages)
+            },
+        )
+        guard let message = messages.first else {
+            throw TelegramLiveLocationSharingError.noMessageReturned
+        }
+        TelegramLiveLocationManager.shared.start(
+            chatId: chatVM.customChat.chat.id,
+            chatTitle: chatVM.customChat.displayTitle,
+            messageId: message.id,
+            livePeriod: livePeriod,
+            expiresIn: livePeriod,
+        )
+        chatVM.replyMessage = nil
+        await chatVM.updateDraft()
+    }
+}
+
+// MARK: - TelegramLiveLocationSharingError
+
+private enum TelegramLiveLocationSharingError: Swift.Error, LocalizedError {
+    case alwaysAccessDenied
+    case noMessageReturned
+
+    // MARK: Internal
+
+    var errorDescription: String? {
+        switch self {
+        case .alwaysAccessDenied:
+            "Live location needs \"Always\" location access to keep updating in the background. Turn it on in Settings."
+        case .noMessageReturned:
+            "Telegram accepted the live location but didn't return the sent message."
+        }
     }
 }

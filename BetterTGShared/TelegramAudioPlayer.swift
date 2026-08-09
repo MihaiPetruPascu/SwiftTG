@@ -1,9 +1,9 @@
 // TelegramAudioPlayer.swift
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Observation
 import SwiftUI
-import TDLibKit
+@preconcurrency import TDLibKit
 
 // MARK: - TelegramAudioPlayer
 
@@ -13,15 +13,17 @@ import TDLibKit
     private init() {}
 
     deinit {
-        timeControlObservation?.invalidate()
-        if let timeObserver {
-            player?.removeTimeObserver(timeObserver)
+        MainActor.assumeIsolated {
+            timeControlObservation?.invalidate()
+            if let timeObserver {
+                player?.removeTimeObserver(timeObserver)
+            }
+            if let playbackFinishedObserver {
+                NotificationCenter.default.removeObserver(playbackFinishedObserver)
+            }
+            resourceLoader?.cancel()
+            fallbackTask?.cancel()
         }
-        if let playbackFinishedObserver {
-            NotificationCenter.default.removeObserver(playbackFinishedObserver)
-        }
-        resourceLoader?.cancel()
-        fallbackTask?.cancel()
     }
 
     // MARK: Internal

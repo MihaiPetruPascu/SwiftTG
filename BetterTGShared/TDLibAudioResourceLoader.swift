@@ -44,7 +44,7 @@ final class TDLibAudioResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @
 
     // MARK: Internal
 
-    let queue = DispatchQueue(label: "com.gruiachiscop.BetterTG.audio-resource-loader")
+    let queue = DispatchQueue(label: "com.mihaipascu.BetterTG.audio-resource-loader")
 
     var assetURL: URL {
         URL(string: "bettertg-audio://file/\(file.id)")!

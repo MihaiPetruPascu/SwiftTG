@@ -150,7 +150,7 @@ final class PrivateCallMediaSession: @unchecked Sendable {
     }
 
     func makeIncomingVideoView(
-        completion: @escaping ((UIView & OngoingCallThreadLocalContextWebrtcVideoView)?) -> Void
+        completion: @escaping @Sendable ((UIView & OngoingCallThreadLocalContextWebrtcVideoView)?) -> Void
     ) {
         lock.lock()
         let engine = context

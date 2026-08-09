@@ -33,6 +33,7 @@ struct ChatInfoView: View {
 
             if let info {
                 profileInformationSection(info)
+                notificationsSection(info)
                 memberDetailsSection(info)
                 sharedContentSection(info)
                 unofficialAppWarningSection(info)
@@ -59,6 +60,15 @@ struct ChatInfoView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: ChatInfoDestination.self) { destination in
             destinationView(destination)
+        }
+        .navigationDestination(isPresented: $showsCommonGroups) {
+            if let userId = info?.commonGroupsUserId {
+                ChatInfoCommonGroupsView(
+                    userId: userId,
+                    expectedCount: info?.commonGroupCount ?? 0,
+                    service: chatVM.service,
+                )
+            }
         }
         .task(id: chat.id) { await loadInfo() }
         .sheet(isPresented: $showsSharedMedia) {
@@ -105,13 +115,12 @@ struct ChatInfoView: View {
         .sheet(isPresented: $showsScheduledMessages) {
             ScheduledMessagesView()
         }
-        .confirmationDialog("Mute \(chat.displayTitle)", isPresented: $showMuteOptions) {
-            ForEach(TelegramMutePreset.allCases) { preset in
-                Button(preset.title) { setMuteDuration(preset.duration) }
-            }
-            Button("Cancel", role: .cancel) {
+        .popover(isPresented: $showMuteOptions) {
+            TelegramMutePresetPopoverContent { duration in
+                setMuteDuration(duration)
                 showMuteOptions = false
             }
+            .presentationCompactAdaptation(.popover)
         }
         .alert(
             "Delete \(chat.displayTitle)?",
@@ -165,6 +174,7 @@ struct ChatInfoView: View {
     @State private var muteOverride: Bool?
     @State private var showDeleteConfirmation = false
     @State private var showMuteOptions = false
+    @State private var showsCommonGroups = false
     @State private var showsScheduledMessages = false
     @State private var showsSharedMedia = false
     @State private var showsCall = false
@@ -401,6 +411,26 @@ struct ChatInfoView: View {
         callPhase = .requesting
     }
 
+    private func notificationsSection(_ info: TelegramChatInfoData) -> some View {
+        Section("Notifications") {
+            Button {
+                if isMuted(info) {
+                    setMuteDuration(0)
+                } else {
+                    showMuteOptions = true
+                }
+            } label: {
+                Text(isMuted(info) ? "Unmute" : "Mute")
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            TelegramChatSoundRow(service: chatVM.service, chatId: chat.id, settings: chat.notificationSettings)
+        }
+    }
+
     private func sharedContentSection(_ info: TelegramChatInfoData) -> some View {
         Section {
             Button {
@@ -408,22 +438,25 @@ struct ChatInfoView: View {
             } label: {
                 Label("Shared Media", systemImage: "photo.on.rectangle")
             }
-            .accessibilityHint("Shows media, files, links, music, and voice messages")
 
             Button {
                 showsScheduledMessages = true
             } label: {
                 Label("Scheduled Messages", systemImage: "clock")
             }
-            .accessibilityHint("Shows messages scheduled to be sent later")
 
             if let commonGroupCount = info.commonGroupCount,
                commonGroupCount > 0,
-               let userId = info.commonGroupsUserId
+               info.commonGroupsUserId != nil
             {
-                NavigationLink(value: ChatInfoDestination.commonGroups(userId: userId, count: commonGroupCount)) {
+                Button {
+                    showsCommonGroups = true
+                } label: {
                     LabeledContent("Groups in common", value: commonGroupCount.formatted())
+                        .foregroundStyle(.primary)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -563,14 +596,6 @@ struct ChatInfoView: View {
                 isChannel: chat.kind == .channel,
                 filter: filter,
                 service: chatVM.service,
-                onSelect: openMember,
-            )
-        case .commonGroups(let userId, let count):
-            ChatInfoCommonGroupsView(
-                userId: userId,
-                expectedCount: count,
-                service: chatVM.service,
-                onSelect: openChat,
             )
         }
     }
@@ -709,35 +734,6 @@ struct ChatInfoView: View {
         }
     }
 
-    private func openMember(_ sender: MessageSender) {
-        Task {
-            let customChat: CustomChat? =
-                switch sender {
-                case .messageSenderUser(let value):
-                    await RootVM.shared.getPrivateCustomChat(userId: value.userId)
-                case .messageSenderChat(let value):
-                    await RootVM.shared.getCustomChat(from: value.chatId)
-                }
-            await openResolvedChat(customChat)
-        }
-    }
-
-    private func openChat(_ resolvedChat: Chat) {
-        Task {
-            let customChat = await RootVM.shared.getCustomChat(from: resolvedChat.id)
-            await openResolvedChat(customChat)
-        }
-    }
-
-    @MainActor private func openResolvedChat(_ customChat: CustomChat?) async {
-        guard let customChat else {
-            errorMessage = "This chat is private or unavailable."
-            return
-        }
-        dismiss()
-        await Task.yield()
-        RootVM.shared.navigate(to: .customChat(customChat, messageId: nil))
-    }
 }
 
 private struct PrivateCallView: View {

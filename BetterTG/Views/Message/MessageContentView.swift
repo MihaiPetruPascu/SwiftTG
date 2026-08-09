@@ -9,6 +9,7 @@ struct MessageContentView: View {
     let service: any TelegramService
     let onMediaTap: (Message?) -> Void
     var onContactTap: () -> Void = {}
+    var onLocationTap: () -> Void = {}
     var onVoiceNoteLocalPathResolved: (String) -> Void = { _ in }
     var onDocumentTransferStatusChange: (String?) -> Void = { _ in }
     var documentDownloadIsPaused = false
@@ -46,6 +47,10 @@ struct MessageContentView: View {
                     )
                 case .messageContact(let messageContact):
                     MessageContactView(content: messageContact, onTap: onContactTap)
+                case .messageLiveLocation, .messageLocation, .messageVenue:
+                    if let presentation = customMessage.locationPresentation {
+                        MessageLocationView(presentation: presentation, onTap: onLocationTap)
+                    }
                 default:
                     EmptyView()
                 }

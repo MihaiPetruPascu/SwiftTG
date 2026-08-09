@@ -1,13 +1,25 @@
 // VoiceNoteRecorder.swift
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import SwiftOGG
 
-final class VoiceNoteRecorder {
+/// All mutable state is only ever touched from `init`/`start()` (before the audio tap exists, so
+/// nothing else can race it yet) or from within `encodingQueue.sync`/`.async` afterward - the
+/// audio-render-thread tap closure and the main-thread `Timer` in `VoiceRecordingController` both
+/// go through that same serial queue, which is the actual thread-safety mechanism `@unchecked`
+/// asserts here.
+final class VoiceNoteRecorder: @unchecked Sendable {
     // MARK: Internal
 
-    private(set) var peakPower: Float = -160
+    /// Reads across `encodingQueue`, the same way `stopAndWrite`/`cancel` already do - `peakPower`
+    /// is written from `updatePeak(from:count:)` on `encodingQueue` (the audio tap's callback) and
+    /// was previously exposed as a plain stored property read directly by a main-thread `Timer`
+    /// (`VoiceRecordingController.startTimer()`), an unsynchronized cross-thread read/write on
+    /// every tick while recording.
+    func currentPeakPower() -> Float {
+        encodingQueue.sync { peakPower }
+    }
 
     func start() throws {
         let input = engine.inputNode
@@ -33,7 +45,10 @@ final class VoiceNoteRecorder {
         peakPower = -160
 
         input.installTap(onBus: 0, bufferSize: 960, format: inputFormat) { [weak self] buffer, _ in
-            self?.encodingQueue.async { self?.encode(buffer, outputFormat: outputFormat) }
+            guard let self else { return }
+            encodingQueue.async { [weak self] in
+                self?.encode(buffer, outputFormat: outputFormat)
+            }
         }
         engine.prepare()
         try engine.start()
@@ -77,6 +92,7 @@ final class VoiceNoteRecorder {
     private var encoder: OGGEncoder?
     private var compressedData = Data()
     private var encodedFrameCount: Int64 = 0
+    private var peakPower: Float = -160
 
     private func encode(_ inputBuffer: AVAudioPCMBuffer, outputFormat: AVAudioFormat) {
         guard let converter, let encoder else { return }
@@ -84,7 +100,7 @@ final class VoiceNoteRecorder {
         let capacity = AVAudioFrameCount(ceil(Double(inputBuffer.frameLength) * ratio)) + 32
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return }
 
-        var suppliedInput = false
+        nonisolated(unsafe) var suppliedInput = false
         var conversionError: NSError?
         let status = converter.convert(to: outputBuffer, error: &conversionError) { _, inputStatus in
             if suppliedInput {

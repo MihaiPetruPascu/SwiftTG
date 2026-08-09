@@ -21,31 +21,33 @@ struct ChatView: View {
         customChat: CustomChat,
         initialMessageId: Int64? = nil,
         movesAccessibilityFocusToInitialMessage: Bool = false,
+        backButtonTitleOverride: String? = nil,
     ) {
         let chatVM = ChatVM(
             customChat: customChat,
             initialMessageId: initialMessageId,
             movesAccessibilityFocusToInitialMessage: movesAccessibilityFocusToInitialMessage,
         )
-        #if DEBUG
-        if MockData.isEnabled, let user = customChat.user {
-            let messages = MockData.makeMessages(chatId: customChat.chat.id, otherUser: user)
-            chatVM.messages = messages
-            customChat.lastMessage = messages.last?.message
-        }
-        #endif
         self._chatVM = State(wrappedValue: chatVM)
+        self.backButtonTitleOverride = backButtonTitleOverride
     }
-    
+
     // MARK: Internal
 
     @AccessibilityFocusState var accessibilityFocusedMessageId: Int64?
     @Environment(\.isPreview) var isPreview
     @Environment(\.dismiss) var dismiss
-    
+
     @FocusState var focused
 
     @State var chatVM: ChatVM
+
+    /// Set when this chat was pushed from somewhere other than the root chat list/another chat
+    /// (e.g. Chat Info's Members or Groups in Common) - `previousChatTitle` only knows how to look
+    /// back through `rootVM.path`, which those screens deliberately don't push onto (see the
+    /// comments in ChatInfoDetailViews.swift), so without this the back button falls back to a
+    /// misleading "Chats" even though back doesn't actually go to the chat list.
+    let backButtonTitleOverride: String?
     
     var body: some View {
         @Bindable var chatVM = chatVM
@@ -152,7 +154,7 @@ struct ChatView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.backward")
                             Text(backButtonTitle)
-                            if previousChatTitle == nil, unreadChatCount > 0 {
+                            if backButtonTitleOverride == nil, previousChatTitle == nil, unreadChatCount > 0 {
                                 Text("\(unreadChatCount)")
                                     .font(.caption2.bold())
                                     .foregroundStyle(.white)
@@ -237,7 +239,15 @@ struct ChatView: View {
         .scrollEdgeEffectHidden(true, for: .all)
         .onTapGesture { focused = false }
         .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.visibleRect.maxY >= geometry.contentSize.height - 20
+            // Hysteresis, not a single fixed threshold: self-sizing bubbles (images/link previews
+            // resolving) make `contentSize.height` jitter by a few points on its own, which with
+            // one threshold flipped this bool - and the button's visibility with it - back and
+            // forth right as it settled at the bottom, so the button looked stuck mid-dismissal.
+            // Once already at the bottom, tolerate more slack before counting that as "scrolled
+            // away" again; only require the tight margin when actually approaching from above.
+            let distanceFromBottom = geometry.contentSize.height - geometry.visibleRect.maxY
+            let threshold: CGFloat = chatVM.isAtBottom ? 80 : 20
+            return distanceFromBottom <= threshold
         } action: { _, isAtBottom in
             guard !isPreview else { return }
             chatVM.updateBottomVisibility(isLastMessageVisible: isAtBottom)
@@ -318,10 +328,13 @@ struct ChatView: View {
     }
 
     private var backButtonTitle: String {
-        previousChatTitle ?? "Chats"
+        backButtonTitleOverride ?? previousChatTitle ?? "Chats"
     }
 
     private var backButtonAccessibilityLabel: String {
+        if let backButtonTitleOverride {
+            return "Back to \(backButtonTitleOverride)"
+        }
         if let previousChatTitle {
             return "Back to \(previousChatTitle)"
         }
@@ -502,7 +515,6 @@ struct ChatView: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityHint("Opens chat information")
     }
 
     private func positionInitialMessagesIfNeeded() {
@@ -510,44 +522,33 @@ struct ChatView: View {
         positionedInitialMessages = true
 
         let focusMessageId: Int64?
-        let highlightsFocusMessage: Bool
+        let anchor: UnitPoint
         if let initialMessageId = chatVM.initialMessageId {
             focusMessageId = initialMessageId
-            highlightsFocusMessage = true
+            anchor = .center
         } else if let initialUnreadMessageId {
             focusMessageId = initialUnreadMessageId
-            highlightsFocusMessage = true
+            anchor = .top
         } else {
             focusMessageId = chatVM.messages.last?.id
-            highlightsFocusMessage = false
+            anchor = .bottom
         }
 
-        var transaction = Transaction()
-        transaction.animation = nil
-        withTransaction(transaction) {
-            if let initialMessageId = chatVM.initialMessageId {
-                initialScrollPosition.scrollTo(id: initialMessageId, anchor: .center)
-            } else if let initialUnreadMessageId {
-                initialScrollPosition.scrollTo(id: initialUnreadMessageId, anchor: .top)
-            } else {
-                initialScrollPosition.scrollTo(edge: .bottom)
-            }
-        }
-        // Opening a chat leaves VoiceOver's cursor wherever it was before the push (usually the
-        // navigation bar) - the scroll position change above doesn't move it. Explicit jumps
-        // (reply/forward origin) already opt into moving focus via `movesAccessibilityFocusToInitialMessage`;
-        // for a plain chat open there's no such flag to check, so always move focus to wherever we
-        // just scrolled, the same way a sighted user is visually dropped there.
-        guard let focusMessageId, chatVM.initialMessageId == nil || chatVM.movesAccessibilityFocusToInitialMessage
-        else { return }
         Task { @MainActor in
+            // `initialMessagesLoaded` flips true the same tick `messages` is populated - List
+            // (UITableView-backed) hasn't necessarily created/laid out those rows yet, so a
+            // `scrollTo` issued synchronously here can silently land nowhere.
             await Task.yield()
-            if highlightsFocusMessage {
-                chatVM.highlightedMessageId = focusMessageId
-            }
-            accessibilityFocusedMessageId = focusMessageId
-            if highlightsFocusMessage {
-                Task.main(delay: 0.8) { chatVM.highlightedMessageId = nil }
+            await Task.yield()
+            guard let focusMessageId else { return }
+            // Scrolls to the exact id, via the same `ScrollViewReader` proxy `focusMessage`/
+            // `scrollToMessage` already rely on - `initialScrollPosition`'s edge-based
+            // `.scrollTo(edge: .bottom)` doesn't guarantee *which* row ends up laid out, only
+            // that the scroll offset ends up near the bottom.
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                chatVM.scrollViewProxy?.scrollTo(focusMessageId, anchor: anchor)
             }
         }
     }

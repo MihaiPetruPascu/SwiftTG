@@ -1,7 +1,7 @@
 // ChatVM+Navigation.swift
 
 import SwiftUI
-import TDLibKit
+@preconcurrency import TDLibKit
 
 extension ChatVM {
     func updateBottomVisibility(isLastMessageVisible: Bool) {
@@ -46,9 +46,10 @@ extension ChatVM {
         let generation = loadingMessagesGeneration
         pendingNavigationMessageId = id
         pendingNavigationMovesAccessibilityFocus = movesAccessibilityFocus
+        let chatId = chatId
         loadingMessagesTask = Task.background {
             guard let history = try? await self.service.getChatHistory(
-                chatId: self.customChat.chat.id,
+                chatId: chatId,
                 fromMessageId: id,
                 limit: 31,
                 offset: -15,
@@ -66,7 +67,7 @@ extension ChatVM {
             let fetchedMessages = history.messages ?? []
             await main { self.loadedMessageIds.formUnion(fetchedMessages.map(\.id)) }
             self.service.mergeMessageHistory(
-                chatId: self.customChat.chat.id,
+                chatId: chatId,
                 messages: fetchedMessages,
             )
             await main {

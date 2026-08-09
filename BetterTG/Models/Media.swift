@@ -7,7 +7,7 @@ import Observation
 /// Thin iOS wrapper around the shared `VoiceMessagePlaybackEngine`, adding audio session setup
 /// and Now Playing/remote-command-center integration around it. macOS's `MacVoicePlayer` wraps
 /// the same engine without either, since neither applies there.
-@Observable final class Media {
+@Observable final class Media: @unchecked Sendable {
     // MARK: Lifecycle
 
     init() {
@@ -63,7 +63,7 @@ import Observation
                 .defaultToSpeaker,
                 .overrideMutedMicrophoneInterruption,
             ]
-            if UIAccessibility.isVoiceOverRunning {
+            if MainActor.assumeIsolated({ UIAccessibility.isVoiceOverRunning }) {
                 options.insert(.mixWithOthers)
             }
             // Deactivating the shared session here interrupts VoiceOver before recording starts
@@ -143,11 +143,14 @@ import Observation
         }
 
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
-                return .commandFailed
+            nonisolated(unsafe) let event = event
+            return MainActor.assumeIsolated {
+                guard let self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
+                    return .commandFailed
+                }
+                self.engine.seek(to: positionEvent.positionTime)
+                return .success
             }
-            MainActor.assumeIsolated { self.engine.seek(to: positionEvent.positionTime) }
-            return .success
         }
 
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in

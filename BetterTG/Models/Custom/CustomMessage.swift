@@ -5,7 +5,7 @@ import TDLibKit
 
 // MARK: - CustomMessage
 
-@Observable final class CustomMessage {
+@MainActor @Observable final class CustomMessage {
     // MARK: Lifecycle
 
     init(
@@ -22,6 +22,7 @@ import TDLibKit
         formattedText: FormattedText? = nil,
         properties: MessageProperties,
         availableReactions: [AvailableReaction] = [],
+        canBeTranslated: Bool = false,
     ) {
         self.message = message
         self.senderUser = senderUser
@@ -36,6 +37,7 @@ import TDLibKit
         self.formattedText = formattedText
         self.properties = properties
         self.availableReactions = availableReactions
+        self.canBeTranslated = canBeTranslated
     }
     
     // MARK: Internal
@@ -129,12 +131,16 @@ import TDLibKit
         }
         return nil
     }
+
+    var locationPresentation: TelegramLocationPresentation? {
+        TelegramLocationPresentation(message.content)
+    }
 }
 
 // MARK: Hashable
 
 extension CustomMessage: Hashable {
-    func hash(into hasher: inout Hasher) {
+    nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
 }
@@ -142,7 +148,7 @@ extension CustomMessage: Hashable {
 // MARK: Identifiable
 
 extension CustomMessage: Identifiable {
-    var id: Int64 { message.id }
+    nonisolated var id: Int64 { message.id }
 }
 
 // MARK: Equatable
@@ -153,7 +159,7 @@ extension CustomMessage: Equatable {
     /// every re-render of an existing message (edits, reactions, pin changes - each producing a
     /// new `CustomMessage` instance per the note on `message` above) look unchanged to SwiftUI,
     /// leaving the row stuck showing whatever it rendered first.
-    static func == (lhs: CustomMessage, rhs: CustomMessage) -> Bool {
+    nonisolated static func == (lhs: CustomMessage, rhs: CustomMessage) -> Bool {
         lhs === rhs
     }
 }

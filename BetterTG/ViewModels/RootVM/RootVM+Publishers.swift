@@ -1,7 +1,7 @@
 // RootVM+Publishers.swift
 
 import SwiftUI
-import TDLibKit
+@preconcurrency import TDLibKit
 
 extension RootVM {
     func setPublishers() {
@@ -15,6 +15,16 @@ extension RootVM {
                     bootstrapChatListsIfReady()
                     Task { @MainActor [weak self] in
                         await self?.resumePendingNotificationOpen()
+                    }
+                    Task { @MainActor [weak self] in
+                        await self?.processPendingShareRequests()
+                    }
+                    Task { @MainActor in
+                        await TelegramLiveLocationManager.shared.resumeActiveShares()
+                    }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await TelegramNotificationSoundCacheRefresh.refreshAll(service: service)
                     }
                 case .authorizationStateClosed,
                      .authorizationStateClosing,
@@ -87,6 +97,43 @@ extension RootVM {
         appliedChatListVersion = snapshot.version
         latestChatListSnapshot = snapshot
         applyFolders(snapshot)
+        scheduleShareChatCacheUpdate()
+    }
+
+    /// Debounced (not written on every single snapshot delta, which can fire many times in a
+    /// burst during initial sync) mirror of the top chats into the App Group's `ShareChatCache`,
+    /// so the Share Extension - which has no TDLib access of its own - has something to show as
+    /// its chat picker.
+    private func scheduleShareChatCacheUpdate() {
+        shareChatCacheWriteTask?.cancel()
+        shareChatCacheWriteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.writeShareChatCache()
+        }
+    }
+
+    @MainActor private func writeShareChatCache() {
+        let topChats = allChats
+            .sorted { ($0.lastMessage?.date ?? 0) > ($1.lastMessage?.date ?? 0) }
+            .prefix(60)
+            .map { chat in
+                ShareTargetChat(
+                    id: chat.chat.id,
+                    title: chat.displayTitle,
+                    isSavedMessages: chat.isSavedMessages,
+                    kind: Self.shareChatKind(chat.kind),
+                )
+            }
+        ShareChatCache.save(Array(topChats))
+    }
+
+    private static func shareChatKind(_ kind: CustomChat.ChatKind) -> ShareChatKind {
+        switch kind {
+        case .bot, .privateChat: .privateChat
+        case .group: .group
+        case .channel: .channel
+        }
     }
 
     private func applyFolders(_ snapshot: ChatListSnapshot) {
@@ -192,21 +239,19 @@ extension RootVM {
         for chatId in addedIds {
             let key = ChatListLoadKey(chatId: chatId, list: list)
             guard loadingChatKeys.insert(key).inserted else { continue }
-            Task.background {
+            Task.main {
                 let chat = await self.getCustomChat(from: chatId, for: list)
-                await main {
-                    self.loadingChatKeys.remove(key)
-                    guard self.isActive(folder),
-                          self.latestChatListSnapshot.items[chatId]?.position(in: list) != nil,
-                          !folder.chats.contains(where: { $0.id == chatId }),
-                          let chat
-                    else { return }
-                    folder.chats.append(chat)
-                    if let item = self.latestChatListSnapshot.items[chatId],
-                       let position = item.position(in: list)
-                    {
-                        self.applyChatChanges(item, position: position, to: chat)
-                    }
+                self.loadingChatKeys.remove(key)
+                guard self.isActive(folder),
+                      self.latestChatListSnapshot.items[chatId]?.position(in: list) != nil,
+                      !folder.chats.contains(where: { $0.id == chatId }),
+                      let chat
+                else { return }
+                withAnimation { folder.chats.append(chat) }
+                if let item = self.latestChatListSnapshot.items[chatId],
+                   let position = item.position(in: list)
+                {
+                    self.applyChatChanges(item, position: position, to: chat)
                 }
             }
         }
@@ -247,16 +292,14 @@ extension RootVM {
 
         let chatIdentifier = ObjectIdentifier(chat)
         senderLoadVersions[chatIdentifier] = messageId
-        Task.background {
+        Task.main {
             let senderName = await self.getSenderName(for: item.lastMessage)
-            await main {
-                guard self.senderLoadVersions[chatIdentifier] == messageId else { return }
-                self.senderLoadVersions.removeValue(forKey: chatIdentifier)
-                guard chat.lastMessage?.id == messageId,
-                      self.isActive(chat)
-                else { return }
-                chat.lastMessageSenderName = senderName
-            }
+            guard self.senderLoadVersions[chatIdentifier] == messageId else { return }
+            self.senderLoadVersions.removeValue(forKey: chatIdentifier)
+            guard chat.lastMessage?.id == messageId,
+                  self.isActive(chat)
+            else { return }
+            chat.lastMessageSenderName = senderName
         }
     }
 

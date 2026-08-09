@@ -14,12 +14,6 @@ import UserNotifications
         guard !Utils.isRunningTests else { return }
         TDLib.shared.startTdLibUpdateHandler()
 
-        #if DEBUG
-        if CommandLine.arguments.contains("-mockData") {
-            MockData.install()
-        }
-        #endif
-
         let appearance = UINavigationBarAppearance()
         appearance.configureWithDefaultBackground()
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
@@ -41,9 +35,41 @@ import UserNotifications
                 EmptyView()
             } else {
                 RootView()
+                    .telegramAppearance()
+                    .appLockOverlay()
+                    // Handles the Share Extension's `swifttg://share?id=<uuid>` hand-off - covers
+                    // both a cold launch (the URL that started the app) and an already-running app,
+                    // unlike the hand-rolled `UIWindowSceneDelegate` this replaced, which turned out
+                    // to never actually get invoked in practice.
+                        .onOpenURL { url in
+                            RootVM.shared.handleShareURL(url)
+                        }
+            }
+        }
+        // Belt-and-suspenders for the share hand-off: `.authorizationStateReady` (RootVM's other
+        // trigger for processPendingShareRequests) only fires once per TDLib session, the first
+        // time it authenticates - if the app was merely backgrounded (not force-quit) between two
+        // shares, it never fires again, so a share made while backgrounded would sit unprocessed
+        // until the next real cold launch. Retrying on every foreground transition closes that gap
+        // regardless of whether the extension's own `open(url:)` hand-off actually landed.
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                TelegramAppLockController.shared.noteWillEnterForeground()
+                Task { await RootVM.shared.processPendingShareRequests() }
+            case .background:
+                TelegramAppLockController.shared.noteDidEnterBackground()
+            case .inactive:
+                break
+            @unknown default:
+                break
             }
         }
     }
+
+    // MARK: Private
+
+    @Environment(\.scenePhase) private var scenePhase
 }
 
 // MARK: - AppDelegate
@@ -95,7 +121,7 @@ import UserNotifications
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
     ) {
         completionHandler([.banner, .list, .sound, .badge])
-        let userInfo = notification.request.content.userInfo
+        nonisolated(unsafe) let userInfo = notification.request.content.userInfo
         Task { @MainActor in
             _ = await PushNotificationsManager.shared.process(userInfo: userInfo)
         }
@@ -111,7 +137,12 @@ import UserNotifications
         if !content.threadIdentifier.isEmpty {
             userInfo["thread-id"] = content.threadIdentifier
         }
+        nonisolated(unsafe) let capturedUserInfo = userInfo
+        nonisolated(unsafe) let capturedResponse = response
+        nonisolated(unsafe) let capturedCompletionHandler = completionHandler
         Task { @MainActor in
+            let userInfo = capturedUserInfo
+            let response = capturedResponse
             _ = await PushNotificationsManager.shared.process(userInfo: userInfo)
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
                 await RootVM.shared.openChatFromNotification(userInfo: userInfo)
@@ -121,7 +152,7 @@ import UserNotifications
             {
                 await Self.sendReply(text: textResponse.userText, userInfo: userInfo)
             }
-            completionHandler()
+            capturedCompletionHandler()
         }
     }
 

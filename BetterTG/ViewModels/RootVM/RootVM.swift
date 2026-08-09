@@ -71,7 +71,7 @@ struct ChatListLoadKey: Hashable, Sendable {
 
 // MARK: - RootVM
 
-@Observable final class RootVM {
+@MainActor @Observable final class RootVM {
     // MARK: Lifecycle
 
     init(service: any TelegramService = TDLib.shared.service) {
@@ -110,6 +110,8 @@ struct ChatListLoadKey: Hashable, Sendable {
     @ObservationIgnored var searchGeneration: UInt64 = 0
     @ObservationIgnored var pendingNotificationTarget: TelegramNotificationTarget?
     @ObservationIgnored var notificationOpenGeneration: UInt64 = 0
+    @ObservationIgnored var shareChatCacheWriteTask: Task<Void, Never>?
+    @ObservationIgnored var shareRequestProcessingTask: Task<Void, Never>?
     
     var loggedIn: Bool {
         get {
@@ -183,9 +185,13 @@ struct ChatListLoadKey: Hashable, Sendable {
     
     func getCustomChats(for chatList: ChatList) async -> [CustomChat]? {
         guard let chatIds = try? await service.getChats(chatList: chatList, limit: 200).chatIds else { return nil }
-        return await chatIds.concurrentCompactMap(withPriority: .utility) { [weak self] chatId in
-            await self?.getCustomChat(from: chatId, for: chatList)
+        var customChats = [CustomChat]()
+        for chatId in chatIds {
+            if let customChat = await getCustomChat(from: chatId, for: chatList) {
+                customChats.append(customChat)
+            }
         }
+        return customChats
     }
 
     // MARK: Private

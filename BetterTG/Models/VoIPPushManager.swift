@@ -1,7 +1,11 @@
 import CallKit
 import PushKit
 
-final class VoIPPushManager: NSObject, PKPushRegistryDelegate {
+private struct VoIPUncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+}
+
+final class VoIPPushManager: NSObject, PKPushRegistryDelegate, @unchecked Sendable {
     static let shared = VoIPPushManager()
 
     override init() {
@@ -49,10 +53,12 @@ final class VoIPPushManager: NSObject, PKPushRegistryDelegate {
         let update = CXCallUpdate()
         update.localizedCallerName = callerName(from: payload.dictionaryPayload)
         update.hasVideo = payload.dictionaryPayload["video"] as? Bool ?? false
+        let userInfo = VoIPUncheckedSendable(value: payload.dictionaryPayload)
+        let pushCompletion = VoIPUncheckedSendable(value: completion)
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] _ in
             Task { @MainActor in
-                _ = await PushNotificationsManager.shared.process(userInfo: payload.dictionaryPayload)
-                completion()
+                _ = await PushNotificationsManager.shared.process(userInfo: userInfo.value)
+                pushCompletion.value()
                 self?.scheduleCallKitCleanup(uuid: uuid)
             }
         }
@@ -95,19 +101,19 @@ extension VoIPPushManager: CXProviderDelegate {
     }
 
     func provider(_: CXProvider, perform action: CXAnswerCallAction) {
+        action.fulfill()
         Task { @MainActor in
             IncomingCallCoordinator.shared.accept()
-            action.fulfill()
         }
         pendingCallUUID = nil
     }
 
     func provider(_: CXProvider, perform action: CXEndCallAction) {
+        action.fulfill()
         Task { @MainActor in
             if IncomingCallCoordinator.shared.isPresented {
                 IncomingCallCoordinator.shared.decline()
             }
-            action.fulfill()
         }
         pendingCallUUID = nil
     }

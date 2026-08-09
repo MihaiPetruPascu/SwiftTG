@@ -75,6 +75,13 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         messageId: Int64?,
         replyMarkup: ReplyMarkup?,
     ) async throws -> Message
+    /// `location: nil` stops sharing the live location.
+    func editMessageLiveLocation(
+        chatId: Int64?,
+        location: LiveLocation?,
+        messageId: Int64?,
+        replyMarkup: ReplyMarkup?,
+    ) async throws -> Message
     func forwardMessages(
         chatId: Int64?,
         fromChatId: Int64?,
@@ -84,6 +91,9 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         sendCopy: Bool?,
         topicId: MessageTopic?,
     ) async throws -> Messages
+    /// Every outgoing live location that still needs periodic updates - persisted by TDLib across
+    /// app restarts, so this is how tracking resumes after a relaunch.
+    func getActiveLiveLocationMessages() async throws -> Messages
     func getBasicGroup(basicGroupId: Int64?) async throws -> BasicGroup
     func getBasicGroupFullInfo(basicGroupId: Int64?) async throws -> BasicGroupFullInfo
     func getChat(chatId: Int64?) async throws -> Chat
@@ -135,12 +145,27 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func terminateSession(sessionId: TdInt64?) async throws -> Ok
     func terminateAllOtherSessions() async throws -> Ok
     func getStickerSet(setId: TdInt64?) async throws -> StickerSet
+    func searchStickerSet(ignoreCache: Bool?, name: String?) async throws -> StickerSet
     func getStickers(
         chatId: Int64?,
         limit: Int?,
         query: String?,
         stickerType: StickerType?,
     ) async throws -> Stickers
+    func uploadStickerFile(sticker: InputFile?, stickerFormat: StickerFormat?, userId: Int64?) async throws -> File
+    func getSuggestedStickerSetName(title: String?) async throws -> Text
+    func checkStickerSetName(name: String?) async throws -> CheckStickerSetNameResult
+    func createNewStickerSet(
+        name: String?,
+        needsRepainting: Bool?,
+        source: String?,
+        stickerType: StickerType?,
+        stickers: [NewSticker]?,
+        title: String?,
+        userId: Int64?,
+    ) async throws -> StickerSet
+    func addStickerToSet(name: String?, sticker: NewSticker?, userId: Int64?) async throws -> Ok
+    func changeStickerSet(isArchived: Bool?, isInstalled: Bool?, setId: TdInt64?) async throws -> Ok
     func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders
     func getLinkPreview(linkPreviewOptions: LinkPreviewOptions?, text: FormattedText?) async throws -> LinkPreview
     func getMe() async throws -> User
@@ -233,7 +258,38 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func setAuthenticationEmailAddress(emailAddress: String?) async throws -> Ok
     func registerUser(disableNotification: Bool?, firstName: String?, lastName: String?) async throws -> Ok
     func requestQrCodeAuthentication(otherUserIds: [Int64]?) async throws -> Ok
+    /// Approves a login QR code scanned with the in-app camera on another (already logged-in)
+    /// device - the counterpart to `requestQrCodeAuthentication`, which is what generates the
+    /// code being scanned in the first place.
+    func confirmQrCodeAuthentication(link: String?) async throws -> Session
     func setMessageSenderBlockList(blockList: BlockList?, senderId: MessageSender?) async throws -> Ok
+    func getUserPrivacySettingRules(setting: UserPrivacySetting?) async throws -> UserPrivacySettingRules
+    func setUserPrivacySettingRules(rules: UserPrivacySettingRules?, setting: UserPrivacySetting?) async throws -> Ok
+    func setScopeNotificationSettings(
+        notificationSettings: ScopeNotificationSettings?,
+        scope: NotificationSettingsScope?,
+    ) async throws -> Ok
+    func getSavedNotificationSounds() async throws -> NotificationSounds
+    func getSavedNotificationSound(notificationSoundId: TdInt64?) async throws -> NotificationSound
+    func addSavedNotificationSound(sound: InputFile?) async throws -> NotificationSound
+    func removeSavedNotificationSound(notificationSoundId: TdInt64?) async throws -> Ok
+    func getAutoDownloadSettingsPresets() async throws -> AutoDownloadSettingsPresets
+    func setAutoDownloadSettings(settings: AutoDownloadSettings?, type: NetworkType?) async throws -> Ok
+    func getPasswordState() async throws -> PasswordState
+    func setPassword(
+        newHint: String?,
+        newPassword: String?,
+        newRecoveryEmailAddress: String?,
+        oldPassword: String?,
+        setRecoveryEmailAddress: Bool?,
+    ) async throws -> PasswordState
+    func addProxy(comment: String?, enable: Bool?, proxy: Proxy?) async throws -> AddedProxy
+    func editProxy(comment: String?, enable: Bool?, proxy: Proxy?, proxyId: Int?) async throws -> AddedProxy
+    func enableProxy(proxyId: Int?) async throws -> Ok
+    func disableProxy() async throws -> Ok
+    func removeProxy(proxyId: Int?) async throws -> Ok
+    func getProxies() async throws -> AddedProxies
+    func pingProxy(proxy: Proxy?) async throws -> Seconds
     func setName(firstName: String?, lastName: String?) async throws -> Ok
     func setBio(bio: String?) async throws -> Ok
     func setUsername(username: String?) async throws -> Ok
@@ -600,6 +656,54 @@ extension TelegramSession: TelegramService {
         )
     }
 
+    func editMessageLiveLocation(
+        chatId: Int64?,
+        location: LiveLocation?,
+        messageId: Int64?,
+        replyMarkup: ReplyMarkup?,
+    ) async throws -> Message {
+        try await client.editMessageLiveLocation(
+            chatId: chatId,
+            location: location,
+            messageId: messageId,
+            replyMarkup: replyMarkup,
+        )
+    }
+
+    /// `GetActiveLiveLocationMessages` exists as a TDLibKit model but was never wired into either
+    /// of TDLibKit's generated client classes (`TDLibApi`/`TdApi`) - confirmed against the
+    /// upstream repo, not just this checkout, via `gh api search/code`, and the currently pinned
+    /// commit is the newest one touching that generated file, so bumping the package wouldn't add
+    /// it either. This replicates what the generated wrappers' own private `run(query:)` does,
+    /// using the same public building blocks it uses internally (`client.encoder`/`client.decoder`
+    /// are `public let`, already configured with TDLib's snake_case wire format) - except for
+    /// unwrapping the response, since `DTO.payload` is only `internal` from outside the module:
+    /// TDLib's response JSON carries the payload's own fields directly (just tagged with an
+    /// `@type`/`@extra` envelope Codable's keyed decoding ignores unless asked for it), so
+    /// decoding straight into `Error`/`Messages` themselves - skipping `DTO<...>` on this side -
+    /// works the same as unwrapping `.payload` would have.
+    func getActiveLiveLocationMessages() async throws -> Messages {
+        try await withCheckedThrowingContinuation { continuation in
+            do {
+                let dto = DTO(GetActiveLiveLocationMessages(), encoder: client.encoder)
+                try client.send(query: dto) { [self] data in
+                    if let error = try? client.decoder.decode(TDLibKit.Error.self, from: data) {
+                        continuation.resume(throwing: error)
+                    } else if let response = try? client.decoder.decode(Messages.self, from: data) {
+                        continuation.resume(returning: response)
+                    } else {
+                        continuation.resume(throwing: TDLibKit.Error(
+                            code: 500,
+                            message: "Couldn't decode getActiveLiveLocationMessages response",
+                        ))
+                    }
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
     func getBasicGroup(basicGroupId: Int64?) async throws -> BasicGroup {
         try await client.getBasicGroup(basicGroupId: basicGroupId)
     }
@@ -750,6 +854,10 @@ extension TelegramSession: TelegramService {
         try await client.getStickerSet(setId: setId)
     }
 
+    func searchStickerSet(ignoreCache: Bool?, name: String?) async throws -> StickerSet {
+        try await client.searchStickerSet(ignoreCache: ignoreCache, name: name)
+    }
+
     func getStickers(
         chatId: Int64?,
         limit: Int?,
@@ -762,6 +870,46 @@ extension TelegramSession: TelegramService {
             query: query,
             stickerType: stickerType,
         )
+    }
+
+    func uploadStickerFile(sticker: InputFile?, stickerFormat: StickerFormat?, userId: Int64?) async throws -> File {
+        try await client.uploadStickerFile(sticker: sticker, stickerFormat: stickerFormat, userId: userId)
+    }
+
+    func getSuggestedStickerSetName(title: String?) async throws -> Text {
+        try await client.getSuggestedStickerSetName(title: title)
+    }
+
+    func checkStickerSetName(name: String?) async throws -> CheckStickerSetNameResult {
+        try await client.checkStickerSetName(name: name)
+    }
+
+    func createNewStickerSet(
+        name: String?,
+        needsRepainting: Bool?,
+        source: String?,
+        stickerType: StickerType?,
+        stickers: [NewSticker]?,
+        title: String?,
+        userId: Int64?,
+    ) async throws -> StickerSet {
+        try await client.createNewStickerSet(
+            name: name,
+            needsRepainting: needsRepainting,
+            source: source,
+            stickerType: stickerType,
+            stickers: stickers,
+            title: title,
+            userId: userId,
+        )
+    }
+
+    func addStickerToSet(name: String?, sticker: NewSticker?, userId: Int64?) async throws -> Ok {
+        try await client.addStickerToSet(name: name, sticker: sticker, userId: userId)
+    }
+
+    func changeStickerSet(isArchived: Bool?, isInstalled: Bool?, setId: TdInt64?) async throws -> Ok {
+        try await client.changeStickerSet(isArchived: isArchived, isInstalled: isInstalled, setId: setId)
     }
 
     func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders {
@@ -908,6 +1056,93 @@ extension TelegramSession: TelegramService {
         try await client.setMessageSenderBlockList(blockList: blockList, senderId: senderId)
     }
 
+    func getUserPrivacySettingRules(setting: UserPrivacySetting?) async throws -> UserPrivacySettingRules {
+        try await client.getUserPrivacySettingRules(setting: setting)
+    }
+
+    func setUserPrivacySettingRules(rules: UserPrivacySettingRules?, setting: UserPrivacySetting?) async throws -> Ok {
+        try await client.setUserPrivacySettingRules(rules: rules, setting: setting)
+    }
+
+    func setScopeNotificationSettings(
+        notificationSettings: ScopeNotificationSettings?,
+        scope: NotificationSettingsScope?,
+    ) async throws -> Ok {
+        try await client.setScopeNotificationSettings(notificationSettings: notificationSettings, scope: scope)
+    }
+
+    func getSavedNotificationSounds() async throws -> NotificationSounds {
+        try await client.getSavedNotificationSounds()
+    }
+
+    func getSavedNotificationSound(notificationSoundId: TdInt64?) async throws -> NotificationSound {
+        try await client.getSavedNotificationSound(notificationSoundId: notificationSoundId)
+    }
+
+    func addSavedNotificationSound(sound: InputFile?) async throws -> NotificationSound {
+        try await client.addSavedNotificationSound(sound: sound)
+    }
+
+    func removeSavedNotificationSound(notificationSoundId: TdInt64?) async throws -> Ok {
+        try await client.removeSavedNotificationSound(notificationSoundId: notificationSoundId)
+    }
+
+    func getAutoDownloadSettingsPresets() async throws -> AutoDownloadSettingsPresets {
+        try await client.getAutoDownloadSettingsPresets()
+    }
+
+    func setAutoDownloadSettings(settings: AutoDownloadSettings?, type: NetworkType?) async throws -> Ok {
+        try await client.setAutoDownloadSettings(settings: settings, type: type)
+    }
+
+    func getPasswordState() async throws -> PasswordState {
+        try await client.getPasswordState()
+    }
+
+    func setPassword(
+        newHint: String?,
+        newPassword: String?,
+        newRecoveryEmailAddress: String?,
+        oldPassword: String?,
+        setRecoveryEmailAddress: Bool?,
+    ) async throws -> PasswordState {
+        try await client.setPassword(
+            newHint: newHint,
+            newPassword: newPassword,
+            newRecoveryEmailAddress: newRecoveryEmailAddress,
+            oldPassword: oldPassword,
+            setRecoveryEmailAddress: setRecoveryEmailAddress,
+        )
+    }
+
+    func addProxy(comment: String?, enable: Bool?, proxy: Proxy?) async throws -> AddedProxy {
+        try await client.addProxy(comment: comment, enable: enable, proxy: proxy)
+    }
+
+    func editProxy(comment: String?, enable: Bool?, proxy: Proxy?, proxyId: Int?) async throws -> AddedProxy {
+        try await client.editProxy(comment: comment, enable: enable, proxy: proxy, proxyId: proxyId)
+    }
+
+    func enableProxy(proxyId: Int?) async throws -> Ok {
+        try await client.enableProxy(proxyId: proxyId)
+    }
+
+    func disableProxy() async throws -> Ok {
+        try await client.disableProxy()
+    }
+
+    func removeProxy(proxyId: Int?) async throws -> Ok {
+        try await client.removeProxy(proxyId: proxyId)
+    }
+
+    func getProxies() async throws -> AddedProxies {
+        try await client.getProxies()
+    }
+
+    func pingProxy(proxy: Proxy?) async throws -> Seconds {
+        try await client.pingProxy(proxy: proxy)
+    }
+
     func setName(firstName: String?, lastName: String?) async throws -> Ok {
         try await client.setName(firstName: firstName, lastName: lastName)
     }
@@ -967,6 +1202,10 @@ extension TelegramSession: TelegramService {
 
     func requestQrCodeAuthentication(otherUserIds: [Int64]?) async throws -> Ok {
         try await client.requestQrCodeAuthentication(otherUserIds: otherUserIds)
+    }
+
+    func confirmQrCodeAuthentication(link: String?) async throws -> Session {
+        try await client.confirmQrCodeAuthentication(link: link)
     }
 
     func toggleChatIsMarkedAsUnread(chatId: Int64?, isMarkedAsUnread: Bool?) async throws -> Ok {

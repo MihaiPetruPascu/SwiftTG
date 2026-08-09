@@ -6,7 +6,7 @@ import Foundation
 
 // MARK: - ChatListItemKind
 
-enum ChatListItemKind: Sendable, Equatable {
+enum ChatListItemKind: String, Sendable, Equatable, Codable {
     case privateChat
     case group
     case channel
@@ -248,8 +248,11 @@ struct ChatListSnapshot: Sendable, Equatable {
 final class TelegramChatListStore: @unchecked Sendable {
     // MARK: Internal
 
+    /// Delivered on the main thread - `subject` is written from the store's private background
+    /// queue, but every consumer is a SwiftUI `.onReceive`/`@Observable` update, which requires
+    /// the main thread.
     var publisher: AnyPublisher<ChatListSnapshot, Never> {
-        subject.eraseToAnyPublisher()
+        subject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     func reduce(_ update: Update) {
@@ -271,7 +274,7 @@ final class TelegramChatListStore: @unchecked Sendable {
 
     // MARK: Private
 
-    private let queue = DispatchQueue(label: "com.gruiachiscop.BetterTG.telegram-chatlist")
+    private let queue = DispatchQueue(label: "com.mihaipascu.BetterTG.telegram-chatlist")
     private var memberships = [ChatListCommunity: ChatListMembership]()
     private var postingPermissions = [ChatListCommunity: Bool]()
     private let subject = CurrentValueSubject<ChatListSnapshot, Never>(.empty)

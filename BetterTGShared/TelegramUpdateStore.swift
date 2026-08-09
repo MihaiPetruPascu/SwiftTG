@@ -1,8 +1,8 @@
 // TelegramUpdateStore.swift
 
-import Combine
+@preconcurrency import Combine
 import Foundation
-import TDLibKit
+@preconcurrency import TDLibKit
 
 final class TelegramUpdateStore: @unchecked Sendable {
     // MARK: Internal
@@ -11,8 +11,11 @@ final class TelegramUpdateStore: @unchecked Sendable {
         chatListStore.publisher
     }
 
+    /// Delivered on the main thread - `updateSubject` is written from `queue` (this store's
+    /// private background queue), but every consumer is a SwiftUI `.onReceive`/`@Observable`
+    /// update, which requires the main thread.
     var updatePublisher: AnyPublisher<Update, Never> {
-        updateSubject.eraseToAnyPublisher()
+        updateSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     var authorizationStatePublisher: AnyPublisher<AuthorizationState, Never> {
@@ -21,6 +24,7 @@ final class TelegramUpdateStore: @unchecked Sendable {
                 guard case .updateAuthorizationState(let value) = update else { return nil }
                 return value.authorizationState
             }
+            .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
 
@@ -70,6 +74,6 @@ final class TelegramUpdateStore: @unchecked Sendable {
     private let chatListStore = TelegramChatListStore()
     private let fileStore = TelegramFileStore()
     private let messageStore = TelegramMessageStore()
-    private let queue = DispatchQueue(label: "com.gruiachiscop.BetterTG.telegram-updates")
+    private let queue = DispatchQueue(label: "com.mihaipascu.BetterTG.telegram-updates")
     private let updateSubject = PassthroughSubject<Update, Never>()
 }
