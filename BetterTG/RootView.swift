@@ -19,6 +19,22 @@ struct RootView: View {
                 LoginView()
             }
         }
+        .overlay(alignment: .top) {
+            if incomingCall.isPresented, incomingCallMinimized {
+                Button {
+                    incomingCallMinimized = false
+                } label: {
+                    Label("Return to call with \(incomingCall.callerName)", systemImage: "phone.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.green, in: Capsule())
+                        .shadow(radius: 6)
+                }
+                .padding(.top, 8)
+            }
+        }
         .transition(.opacity)
         .task(id: rootVM.loggedIn) {
             guard rootVM.loggedIn else { return }
@@ -28,11 +44,17 @@ struct RootView: View {
         }
         .fullScreenCover(
             isPresented: Binding(
-                get: { incomingCall.isPresented },
+                get: { incomingCall.isPresented && !incomingCallMinimized },
                 set: { _ in }
             )
         ) {
-            IncomingCallView(coordinator: incomingCall)
+            IncomingCallView(
+                coordinator: incomingCall,
+                onMinimize: { incomingCallMinimized = true }
+            )
+        }
+        .onChange(of: incomingCall.isPresented) { _, isPresented in
+            if !isPresented { incomingCallMinimized = false }
         }
         .alert(
             "Call Error",
@@ -51,4 +73,5 @@ struct RootView: View {
 
     @State private var rootVM = RootVM.shared
     @State private var incomingCall = IncomingCallCoordinator.shared
+    @State private var incomingCallMinimized = false
 }

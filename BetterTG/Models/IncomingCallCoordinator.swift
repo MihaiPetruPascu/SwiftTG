@@ -116,10 +116,11 @@ import TDLibKit
         case .callStatePending:
             break
         case .callStateExchangingKeys:
-            ServiceSoundManager.shared.stopIncomingCallTone()
+            ServiceSoundManager.shared.stopIncomingCallTone(deactivateAudioSession: false)
+            ServiceSoundManager.shared.startCallConnectingTone()
             phase = .connecting
         case .callStateReady(let ready):
-            ServiceSoundManager.shared.stopIncomingCallTone()
+            ServiceSoundManager.shared.stopIncomingCallTone(deactivateAudioSession: false)
             if mediaSession == nil {
                 guard let session = PrivateCallMediaSession(call: updatedCall, ready: ready, service: service) else {
                     errorMessage = "The call media engine couldn't negotiate a compatible Telegram protocol."
@@ -134,6 +135,7 @@ import TDLibKit
                 }
                 pendingSignalingData.forEach(session.addSignalingData)
                 pendingSignalingData.removeAll()
+                ServiceSoundManager.shared.playCallConnectedSound()
             }
             connectedAt = connectedAt ?? Foundation.Date()
             phase = .ready(ready.emojis)
@@ -141,9 +143,16 @@ import TDLibKit
             ServiceSoundManager.shared.stopIncomingCallTone()
             phase = .ending
         case .callStateDiscarded:
-            reset()
+            let discardedCallId = updatedCall.id
+            ServiceSoundManager.shared.playCallEndedSound()
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(1_350))
+                guard self?.call?.id == discardedCallId else { return }
+                self?.reset()
+            }
         case .callStateError(let value):
             errorMessage = value.error.message
+            ServiceSoundManager.shared.stopCallConnectingTone()
             reset()
         }
     }
@@ -167,6 +176,7 @@ import TDLibKit
 
     private func finish(disconnected: Bool) {
         ServiceSoundManager.shared.stopIncomingCallTone()
+        ServiceSoundManager.shared.stopCallConnectingTone()
         guard let call else {
             reset()
             return

@@ -77,24 +77,65 @@ import UIKit
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .voicePrompt)
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.allowBluetoothHFP, .defaultToSpeaker, .mixWithOthers]
+            )
             try session.setActive(true)
+            startOutgoingCallProximityMonitoring()
             try engine.start()
             player.scheduleBuffer(buffer, at: nil, options: .loops)
             player.play()
             callToneEngine = engine
             callTonePlayer = player
         } catch {
+            stopOutgoingCallProximityMonitoring()
             engine.stop()
         }
     }
 
-    func stopOutgoingCallTone() {
+    func stopOutgoingCallTone(deactivateAudioSession: Bool = true) {
+        stopOutgoingCallProximityMonitoring()
         callTonePlayer?.stop()
         callToneEngine?.stop()
         callTonePlayer = nil
         callToneEngine = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if deactivateAudioSession {
+            let audio = AVAudioSession.sharedInstance()
+            try? audio.overrideOutputAudioPort(.none)
+            try? audio.setPreferredInput(nil)
+            try? audio.setActive(false, options: .notifyOthersOnDeactivation)
+            try? audio.setCategory(.soloAmbient, mode: .default)
+        }
+    }
+
+    func startCallConnectingTone() {
+        guard connectingCallPlayer == nil,
+              let player = makeCallSoundPlayer(named: "voip_connecting")
+        else { return }
+        player.numberOfLoops = -1
+        player.play()
+        connectingCallPlayer = player
+    }
+
+    func playCallConnectedSound() {
+        stopCallConnectingTone()
+        guard let player = makeCallSoundPlayer(named: "voip_connected") else { return }
+        player.play()
+        callFeedbackPlayer = player
+    }
+
+    func playCallEndedSound() {
+        stopCallConnectingTone()
+        guard let player = makeCallSoundPlayer(named: "voip_end") else { return }
+        player.play()
+        callFeedbackPlayer = player
+    }
+
+    func stopCallConnectingTone() {
+        connectingCallPlayer?.stop()
+        connectingCallPlayer = nil
     }
 
     func startIncomingCallTone() {
@@ -140,12 +181,14 @@ import UIKit
         }
     }
 
-    func stopIncomingCallTone() {
+    func stopIncomingCallTone(deactivateAudioSession: Bool = true) {
         incomingCallTonePlayer?.stop()
         incomingCallToneEngine?.stop()
         incomingCallTonePlayer = nil
         incomingCallToneEngine = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if deactivateAudioSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     // MARK: Private
@@ -154,9 +197,50 @@ import UIKit
     private var messageDeliveredSound: SystemSoundID = 0
     private var callToneEngine: AVAudioEngine?
     private var callTonePlayer: AVAudioPlayerNode?
+    private var connectingCallPlayer: AVAudioPlayer?
+    private var callFeedbackPlayer: AVAudioPlayer?
+    private var outgoingCallProximityObserver: NSObjectProtocol?
     private var incomingCallToneEngine: AVAudioEngine?
     private var incomingCallTonePlayer: AVAudioPlayerNode?
     private var policy = TelegramServiceSoundPolicy()
+
+    private func makeCallSoundPlayer(named name: String) -> AVAudioPlayer? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3"),
+              let player = try? AVAudioPlayer(contentsOf: url)
+        else { return nil }
+        player.prepareToPlay()
+        return player
+    }
+
+    private func startOutgoingCallProximityMonitoring() {
+        UIDevice.current.isProximityMonitoringEnabled = true
+        outgoingCallProximityObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.proximityStateDidChangeNotification,
+            object: UIDevice.current,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                ServiceSoundManager.shared.updateOutgoingCallAudioRoute()
+            }
+        }
+        updateOutgoingCallAudioRoute()
+    }
+
+    private func stopOutgoingCallProximityMonitoring() {
+        if let outgoingCallProximityObserver {
+            NotificationCenter.default.removeObserver(outgoingCallProximityObserver)
+            self.outgoingCallProximityObserver = nil
+        }
+        UIDevice.current.isProximityMonitoringEnabled = false
+    }
+
+    private func updateOutgoingCallAudioRoute() {
+        let audio = AVAudioSession.sharedInstance()
+        guard let output = audio.currentRoute.outputs.first,
+              output.portType == .builtInSpeaker || output.portType == .builtInReceiver
+        else { return }
+        try? audio.overrideOutputAudioPort(UIDevice.current.proximityState ? .none : .speaker)
+    }
 
     private func loadSound(named name: String, extension fileExtension: String) -> SystemSoundID {
         guard let url = Bundle.main.url(forResource: name, withExtension: fileExtension) else { return 0 }

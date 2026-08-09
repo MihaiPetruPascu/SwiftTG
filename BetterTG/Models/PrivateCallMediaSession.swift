@@ -6,6 +6,13 @@ import UIKit
 
 /// Owns the native tgcalls/WebRTC engine for one TDLib private call.
 final class PrivateCallMediaSession: @unchecked Sendable {
+    private enum AudioRoutingPreference {
+        case automatic
+        case speaker
+        case receiver
+        case external
+    }
+
     /// Advertise exactly the implementations registered by the bundled tgcalls
     /// framework, matching Telegram iOS instead of maintaining a stale list.
     static var supportedProtocol: CallProtocol {
@@ -54,6 +61,8 @@ final class PrivateCallMediaSession: @unchecked Sendable {
     private var remoteVideoActiveHandler: (@Sendable (Bool) -> Void)?
     private var isRemoteVideoActive = false
     private var cameraPosition: AVCaptureDevice.Position = .front
+    private var audioObservers = [NSObjectProtocol]()
+    private var audioRoutingPreference = AudioRoutingPreference.automatic
     private let lock = NSLock()
 
     init?(call: Call, ready: CallStateReady, service: any TelegramService) {
@@ -124,14 +133,14 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         engine.stateChanged = { [weak self] _, _, remoteVideoState, _, _, _ in
             self?.notifyRemoteVideoActive(remoteVideoState == .active)
         }
-        queue.dispatch {
+        queue.dispatch { [weak self] in
             engine.setManualAudioSessionIsActive(true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
-                let audio = AVAudioSession.sharedInstance()
-                try? audio.overrideOutputAudioPort(.speaker)
+                self?.applyAudioRoutingPreference()
             }
         }
         context = engine
+        startProximityMonitoring()
     }
 
     func addSignalingData(_ data: Data) {
@@ -149,8 +158,26 @@ final class PrivateCallMediaSession: @unchecked Sendable {
     }
 
     func setSpeakerEnabled(_ isEnabled: Bool) {
-        DispatchQueue.main.async {
-            try? AVAudioSession.sharedInstance().overrideOutputAudioPort(isEnabled ? .speaker : .none)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            audioRoutingPreference = isEnabled ? .speaker : .receiver
+            let audio = AVAudioSession.sharedInstance()
+            if isEnabled {
+                try? audio.setPreferredInput(nil)
+            } else if let builtInInput = audio.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+                try? audio.setPreferredInput(builtInInput)
+            }
+            try? audio.overrideOutputAudioPort(isEnabled ? .speaker : .none)
+        }
+    }
+
+    func selectAudioInput(_ input: AVAudioSessionPortDescription) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            audioRoutingPreference = .external
+            let audio = AVAudioSession.sharedInstance()
+            try? audio.overrideOutputAudioPort(.none)
+            try? audio.setPreferredInput(input)
         }
     }
 
@@ -227,6 +254,7 @@ final class PrivateCallMediaSession: @unchecked Sendable {
     }
 
     func stop() {
+        stopProximityMonitoring()
         lock.lock()
         let engine = context
         context = nil
@@ -235,7 +263,76 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         lock.unlock()
         engine?.beginTermination()
         engine?.stop(nil)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        DispatchQueue.main.async {
+            let audio = AVAudioSession.sharedInstance()
+            try? audio.overrideOutputAudioPort(.none)
+            try? audio.setPreferredInput(nil)
+            try? audio.setActive(false, options: .notifyOthersOnDeactivation)
+            try? audio.setCategory(.soloAmbient, mode: .default)
+        }
+    }
+
+    private func startProximityMonitoring() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            UIDevice.current.isProximityMonitoringEnabled = true
+            audioObservers = [
+                NotificationCenter.default.addObserver(
+                    forName: UIDevice.proximityStateDidChangeNotification,
+                    object: UIDevice.current,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.updateBuiltInAudioRouteForProximity()
+                    }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: AVAudioSession.routeChangeNotification,
+                    object: AVAudioSession.sharedInstance(),
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.updateBuiltInAudioRouteForProximity()
+                    }
+                },
+            ]
+            applyAudioRoutingPreference()
+        }
+    }
+
+    private func stopProximityMonitoring() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            audioObservers.forEach(NotificationCenter.default.removeObserver)
+            audioObservers.removeAll()
+            UIDevice.current.isProximityMonitoringEnabled = false
+        }
+    }
+
+    @MainActor private func updateBuiltInAudioRouteForProximity() {
+        guard audioRoutingPreference == .automatic else { return }
+        applyAudioRoutingPreference()
+    }
+
+    @MainActor private func applyAudioRoutingPreference() {
+        let audio = AVAudioSession.sharedInstance()
+        switch audioRoutingPreference {
+        case .automatic:
+            guard let output = audio.currentRoute.outputs.first,
+                  output.portType == .builtInSpeaker || output.portType == .builtInReceiver
+            else { return }
+            try? audio.overrideOutputAudioPort(UIDevice.current.proximityState ? .none : .speaker)
+        case .speaker:
+            try? audio.setPreferredInput(nil)
+            try? audio.overrideOutputAudioPort(.speaker)
+        case .receiver:
+            if let builtInInput = audio.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+                try? audio.setPreferredInput(builtInInput)
+            }
+            try? audio.overrideOutputAudioPort(.none)
+        case .external:
+            break
+        }
     }
 
     private func notifyRemoteVideoActive(_ isActive: Bool) {
@@ -251,7 +348,7 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         try? audio.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.allowBluetoothHFP, .defaultToSpeaker]
+            options: [.allowBluetoothHFP, .defaultToSpeaker, .mixWithOthers]
         )
         try? audio.setActive(true)
         try? audio.overrideOutputAudioPort(.speaker)

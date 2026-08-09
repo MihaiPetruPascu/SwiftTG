@@ -80,7 +80,26 @@ struct ChatInfoView: View {
                 openSharedMediaMessage(messageId)
             }
         }
-        .fullScreenCover(isPresented: $showsCall) {
+        .overlay(alignment: .top) {
+            if showsCall, isCallMinimized {
+                Button {
+                    isCallMinimized = false
+                } label: {
+                    Label("Return to call with \(chat.displayTitle)", systemImage: "phone.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.green, in: Capsule())
+                        .shadow(radius: 6)
+                }
+                .padding(.top, 8)
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { showsCall && !isCallMinimized },
+            set: { _ in }
+        )) {
             PrivateCallView(
                 title: chat.chat.title,
                 photo: chat.chat.photo,
@@ -94,6 +113,7 @@ struct ChatInfoView: View {
                     callMediaSession?.setVideoEnabled($0)
                 },
                 onSwitchCamera: { callMediaSession?.switchCamera() },
+                onMinimize: { isCallMinimized = true },
                 onHangUp: endCall,
             )
         }
@@ -178,6 +198,7 @@ struct ChatInfoView: View {
     @State private var showsScheduledMessages = false
     @State private var showsSharedMedia = false
     @State private var showsCall = false
+    @State private var isCallMinimized = false
     @State private var activeCallId: Int?
     @State private var activeCallUserId: Int64?
     @State private var activeCallIsVideo = false
@@ -304,6 +325,7 @@ struct ChatInfoView: View {
         callConnectedAt = nil
         callPhase = .requesting
         showsCall = true
+        isCallMinimized = false
         ServiceSoundManager.shared.startOutgoingCallTone()
 
         Task {
@@ -334,10 +356,11 @@ struct ChatInfoView: View {
         case .callStatePending:
             callPhase = .ringing
         case .callStateExchangingKeys:
-            ServiceSoundManager.shared.stopOutgoingCallTone()
+            ServiceSoundManager.shared.stopOutgoingCallTone(deactivateAudioSession: false)
+            ServiceSoundManager.shared.startCallConnectingTone()
             callPhase = .connecting
         case .callStateReady(let ready):
-            ServiceSoundManager.shared.stopOutgoingCallTone()
+            ServiceSoundManager.shared.stopOutgoingCallTone(deactivateAudioSession: false)
             if callMediaSession == nil {
                 guard let mediaSession = PrivateCallMediaSession(call: call, ready: ready, service: chatVM.service) else {
                     showsCall = false
@@ -353,6 +376,7 @@ struct ChatInfoView: View {
                 }
                 pendingCallSignalingData.forEach(mediaSession.addSignalingData)
                 pendingCallSignalingData.removeAll()
+                ServiceSoundManager.shared.playCallConnectedSound()
             }
             if callConnectedAt == nil { callConnectedAt = Foundation.Date() }
             callPhase = .ready(ready.emojis)
@@ -360,11 +384,13 @@ struct ChatInfoView: View {
             ServiceSoundManager.shared.stopOutgoingCallTone()
             callPhase = .ending
         case .callStateDiscarded:
-            ServiceSoundManager.shared.stopOutgoingCallTone()
+            ServiceSoundManager.shared.stopOutgoingCallTone(deactivateAudioSession: false)
+            ServiceSoundManager.shared.playCallEndedSound()
             callPhase = .ended
             finishCallPresentation()
         case .callStateError(let value):
             ServiceSoundManager.shared.stopOutgoingCallTone()
+            ServiceSoundManager.shared.stopCallConnectingTone()
             showsCall = false
             clearCallState()
             errorMessage = value.error.message
@@ -400,7 +426,7 @@ struct ChatInfoView: View {
 
     private func finishCallPresentation() {
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(650))
+            try? await Task.sleep(for: .milliseconds(1_350))
             showsCall = false
             clearCallState()
         }
@@ -408,11 +434,13 @@ struct ChatInfoView: View {
 
     private func clearCallState() {
         ServiceSoundManager.shared.stopOutgoingCallTone()
+        ServiceSoundManager.shared.stopCallConnectingTone()
         callMediaSession?.stop()
         callMediaSession = nil
         pendingCallSignalingData.removeAll()
         activeCallId = nil
         activeCallUserId = nil
+        isCallMinimized = false
         remoteCallVideoActive = false
         callConnectedAt = nil
         callPhase = .requesting
@@ -753,6 +781,7 @@ private struct PrivateCallView: View {
     let onMuteChanged: (Bool) -> Void
     let onVideoChanged: (Bool) -> Void
     let onSwitchCamera: () -> Void
+    let onMinimize: () -> Void
     let onHangUp: () -> Void
 
     @State private var isMuted = false
@@ -768,6 +797,7 @@ private struct PrivateCallView: View {
         onMuteChanged: @escaping (Bool) -> Void,
         onVideoChanged: @escaping (Bool) -> Void,
         onSwitchCamera: @escaping () -> Void,
+        onMinimize: @escaping () -> Void,
         onHangUp: @escaping () -> Void
     ) {
         self.title = title
@@ -779,6 +809,7 @@ private struct PrivateCallView: View {
         self.onMuteChanged = onMuteChanged
         self.onVideoChanged = onVideoChanged
         self.onSwitchCamera = onSwitchCamera
+        self.onMinimize = onMinimize
         self.onHangUp = onHangUp
         _isCameraEnabled = State(initialValue: isVideo)
     }
@@ -836,6 +867,17 @@ private struct PrivateCallView: View {
             .padding()
         }
         .interactiveDismissDisabled()
+        .overlay(alignment: .topTrailing) {
+            Button(action: onMinimize) {
+                Image(systemName: "chevron.down")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.28), in: Circle())
+            }
+            .padding()
+            .accessibilityLabel("Minimize call")
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 14) {
                 cameraButton(size: 60)
@@ -916,7 +958,7 @@ private struct PrivateCallView: View {
     }
 
     private func speakerButton(size: CGFloat) -> some View {
-        AudioRoutePickerButton(size: size)
+        AudioDeviceMenuButton(size: size, mediaSession: mediaSession)
             .disabled(!controlsEnabled)
     }
 

@@ -1,9 +1,10 @@
+import AVFoundation
 import SwiftUI
 import UIKit
-import AVKit
 
 struct IncomingCallView: View {
     let coordinator: IncomingCallCoordinator
+    let onMinimize: () -> Void
 
     @State private var isMuted = false
     @State private var isCameraEnabled = false
@@ -62,6 +63,17 @@ struct IncomingCallView: View {
             .padding()
         }
         .interactiveDismissDisabled()
+        .overlay(alignment: .topTrailing) {
+            Button(action: onMinimize) {
+                Image(systemName: "chevron.down")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.28), in: Circle())
+            }
+            .padding()
+            .accessibilityLabel("Minimize call")
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if coordinator.phase == .incoming {
                 incomingControls
@@ -117,7 +129,7 @@ struct IncomingCallView: View {
             }
             .disabled(!isConnected)
 
-            AudioRoutePickerButton(size: 60)
+            AudioDeviceMenuButton(size: 60, mediaSession: coordinator.activeMediaSession)
                 .disabled(!isConnected)
 
             if isCameraEnabled {
@@ -184,35 +196,87 @@ struct CallVerificationEmojiView: View {
     }
 }
 
-struct AudioRoutePickerButton: View {
+struct AudioDeviceMenuButton: View {
     let size: CGFloat
+    let mediaSession: PrivateCallMediaSession?
+
+    @State private var showsRoutes = false
+    @State private var inputs = [AVAudioSessionPortDescription]()
 
     var body: some View {
-        VStack(spacing: 7) {
-            SystemAudioRoutePicker()
-                .frame(width: size, height: size)
-                .background(.white.opacity(0.18), in: Circle())
+        Button {
+            let audio = AVAudioSession.sharedInstance()
+            try? audio.setActive(true)
+            inputs = audio.availableInputs ?? []
+            showsRoutes = true
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: size, height: size)
+                    .foregroundStyle(.white)
+                    .background(.white.opacity(0.18), in: Circle())
 
-            Text("Speaker")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
+                Text("Speaker")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 70)
         }
-        .frame(minWidth: 70)
-    }
-}
+        .buttonStyle(.plain)
+        .popover(isPresented: $showsRoutes, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Audio output")
+                    .font(.headline)
+                    .padding()
 
-private struct SystemAudioRoutePicker: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let picker = AVRoutePickerView()
-        picker.prioritizesVideoDevices = false
-        picker.tintColor = .white
-        picker.activeTintColor = .white
-        picker.accessibilityLabel = "Choose audio device"
-        return picker
+                Divider()
+                routeButton("iPhone", systemImage: "iphone") {
+                    mediaSession?.setSpeakerEnabled(false)
+                }
+                routeButton("Speaker", systemImage: "speaker.wave.2.fill") {
+                    mediaSession?.setSpeakerEnabled(true)
+                }
+                ForEach(externalInputs, id: \.uid) { input in
+                    routeButton(input.portName, systemImage: "headphones") {
+                        mediaSession?.selectAudioInput(input)
+                    }
+                }
+
+                Divider()
+                Button("Close menu") {
+                    showsRoutes = false
+                }
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .buttonStyle(.borderedProminent)
+                .padding()
+            }
+            .frame(minWidth: 280)
+            .presentationCompactAdaptation(.popover)
+        }
     }
 
-    func updateUIView(_ picker: AVRoutePickerView, context: Context) {}
+    private var externalInputs: [AVAudioSessionPortDescription] {
+        inputs.filter { $0.portType != .builtInMic }
+    }
+
+    private func routeButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+            showsRoutes = false
+        } label: {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
 }
 
 struct RemoteCallVideoView: UIViewRepresentable {
