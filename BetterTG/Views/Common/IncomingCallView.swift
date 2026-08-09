@@ -44,17 +44,18 @@ struct IncomingCallView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
 
-                Label(
-                    coordinator.phase.title,
-                    systemImage: coordinator.isVideo ? "video.fill" : "phone.fill"
-                )
-                .font(.title3)
-                .foregroundStyle(.white.opacity(0.9))
-
                 if case .ready(let emojis) = coordinator.phase, !emojis.isEmpty {
-                    Text(emojis.joined(separator: " "))
-                        .font(.title)
-                        .accessibilityLabel("Call encryption verification")
+                    CallVerificationEmojiView(
+                        emojis: emojis,
+                        peerName: coordinator.callerName
+                    )
+                } else {
+                    Label(
+                        coordinator.phase.title,
+                        systemImage: coordinator.isVideo ? "video.fill" : "phone.fill"
+                    )
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.9))
                 }
                 Spacer()
             }
@@ -166,6 +167,28 @@ struct IncomingCallView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+    }
+}
+
+struct CallVerificationEmojiView: View {
+    let emojis: [String]
+    let peerName: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(emojis.joined(separator: " "))
+                .font(.system(size: 38))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Text("Compare these emoji with \(peerName)")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 18))
     }
 }
 

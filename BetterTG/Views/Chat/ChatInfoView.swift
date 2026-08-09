@@ -817,16 +817,12 @@ private struct PrivateCallView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
 
-                Label(phase.title, systemImage: isVideo ? "video.fill" : "phone.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white.opacity(0.9))
-
-                if case .ready(let emojis) = phase {
-                    if !emojis.isEmpty {
-                        Text(emojis.joined(separator: " "))
-                            .font(.title)
-                            .accessibilityLabel("Call encryption verification")
-                    }
+                if case .ready(let emojis) = phase, !emojis.isEmpty {
+                    CallVerificationEmojiView(emojis: emojis, peerName: title)
+                } else {
+                    Label(phase.title, systemImage: isVideo ? "video.fill" : "phone.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.9))
                 }
 
                 Spacer()
