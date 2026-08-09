@@ -27,6 +27,7 @@ import TDLibKit
     private(set) var isPresented = false
     private(set) var callerName = "Telegram user"
     private(set) var isVideo = false
+    private(set) var isRemoteVideoActive = false
     private(set) var phase = Phase.incoming
     var errorMessage: String?
     var activeMediaSession: PrivateCallMediaSession? { mediaSession }
@@ -126,6 +127,11 @@ import TDLibKit
                     return
                 }
                 mediaSession = session
+                session.setRemoteVideoActiveHandler { [weak self] isActive in
+                    Task { @MainActor [weak self] in
+                        self?.isRemoteVideoActive = isActive
+                    }
+                }
                 pendingSignalingData.forEach(session.addSignalingData)
                 pendingSignalingData.removeAll()
             }
@@ -188,6 +194,7 @@ import TDLibKit
         ServiceSoundManager.shared.stopIncomingCallTone()
         mediaSession?.stop()
         mediaSession = nil
+        isRemoteVideoActive = false
         pendingSignalingData.removeAll()
         call = nil
         connectedAt = nil

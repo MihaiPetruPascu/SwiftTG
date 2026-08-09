@@ -51,6 +51,8 @@ final class PrivateCallMediaSession: @unchecked Sendable {
     private let queue = EngineQueue()
     private var context: OngoingCallThreadLocalContextWebrtc?
     private var videoCapturer: OngoingCallThreadLocalContextVideoCapturer?
+    private var remoteVideoActiveHandler: (@Sendable (Bool) -> Void)?
+    private var isRemoteVideoActive = false
     private var cameraPosition: AVCaptureDevice.Position = .front
     private let lock = NSLock()
 
@@ -119,6 +121,9 @@ final class PrivateCallMediaSession: @unchecked Sendable {
                 directConnection: nil
             )
         }
+        engine.stateChanged = { [weak self] _, _, remoteVideoState, _, _, _ in
+            self?.notifyRemoteVideoActive(remoteVideoState == .active)
+        }
         queue.dispatch {
             engine.setManualAudioSessionIsActive(true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
@@ -147,6 +152,14 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         DispatchQueue.main.async {
             try? AVAudioSession.sharedInstance().overrideOutputAudioPort(isEnabled ? .speaker : .none)
         }
+    }
+
+    func setRemoteVideoActiveHandler(_ handler: @escaping @Sendable (Bool) -> Void) {
+        lock.lock()
+        remoteVideoActiveHandler = handler
+        let isActive = isRemoteVideoActive
+        lock.unlock()
+        handler(isActive)
     }
 
     func makeIncomingVideoView(
@@ -218,10 +231,19 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         let engine = context
         context = nil
         videoCapturer = nil
+        remoteVideoActiveHandler = nil
         lock.unlock()
         engine?.beginTermination()
         engine?.stop(nil)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func notifyRemoteVideoActive(_ isActive: Bool) {
+        lock.lock()
+        isRemoteVideoActive = isActive
+        let handler = remoteVideoActiveHandler
+        lock.unlock()
+        handler?(isActive)
     }
 
     private func configureAudioSession() {

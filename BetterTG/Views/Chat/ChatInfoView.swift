@@ -86,9 +86,9 @@ struct ChatInfoView: View {
                 photo: chat.chat.photo,
                 phase: callPhase,
                 isVideo: activeCallIsVideo,
+                isRemoteVideoActive: remoteCallVideoActive,
                 mediaSession: callMediaSession,
                 onMuteChanged: { callMediaSession?.setMuted($0) },
-                onSpeakerChanged: { callMediaSession?.setSpeakerEnabled($0) },
                 onVideoChanged: {
                     activeCallIsVideo = $0
                     callMediaSession?.setVideoEnabled($0)
@@ -181,6 +181,7 @@ struct ChatInfoView: View {
     @State private var activeCallId: Int?
     @State private var activeCallUserId: Int64?
     @State private var activeCallIsVideo = false
+    @State private var remoteCallVideoActive = false
     @State private var callPhase = PrivateCallPhase.requesting
     @State private var callConnectedAt: Foundation.Date?
     @State private var callMediaSession: PrivateCallMediaSession?
@@ -345,6 +346,11 @@ struct ChatInfoView: View {
                     return
                 }
                 callMediaSession = mediaSession
+                mediaSession.setRemoteVideoActiveHandler { isActive in
+                    Task { @MainActor in
+                        remoteCallVideoActive = isActive
+                    }
+                }
                 pendingCallSignalingData.forEach(mediaSession.addSignalingData)
                 pendingCallSignalingData.removeAll()
             }
@@ -407,6 +413,7 @@ struct ChatInfoView: View {
         pendingCallSignalingData.removeAll()
         activeCallId = nil
         activeCallUserId = nil
+        remoteCallVideoActive = false
         callConnectedAt = nil
         callPhase = .requesting
     }
@@ -741,15 +748,14 @@ private struct PrivateCallView: View {
     let photo: ChatPhotoInfo?
     let phase: PrivateCallPhase
     let isVideo: Bool
+    let isRemoteVideoActive: Bool
     let mediaSession: PrivateCallMediaSession?
     let onMuteChanged: (Bool) -> Void
-    let onSpeakerChanged: (Bool) -> Void
     let onVideoChanged: (Bool) -> Void
     let onSwitchCamera: () -> Void
     let onHangUp: () -> Void
 
     @State private var isMuted = false
-    @State private var isSpeakerEnabled = true
     @State private var isCameraEnabled: Bool
 
     init(
@@ -757,9 +763,9 @@ private struct PrivateCallView: View {
         photo: ChatPhotoInfo?,
         phase: PrivateCallPhase,
         isVideo: Bool,
+        isRemoteVideoActive: Bool,
         mediaSession: PrivateCallMediaSession?,
         onMuteChanged: @escaping (Bool) -> Void,
-        onSpeakerChanged: @escaping (Bool) -> Void,
         onVideoChanged: @escaping (Bool) -> Void,
         onSwitchCamera: @escaping () -> Void,
         onHangUp: @escaping () -> Void
@@ -768,9 +774,9 @@ private struct PrivateCallView: View {
         self.photo = photo
         self.phase = phase
         self.isVideo = isVideo
+        self.isRemoteVideoActive = isRemoteVideoActive
         self.mediaSession = mediaSession
         self.onMuteChanged = onMuteChanged
-        self.onSpeakerChanged = onSpeakerChanged
         self.onVideoChanged = onVideoChanged
         self.onSwitchCamera = onSwitchCamera
         self.onHangUp = onHangUp
@@ -791,7 +797,7 @@ private struct PrivateCallView: View {
             )
             .ignoresSafeArea()
 
-            if isVideo, let mediaSession, case .ready = phase {
+            if isRemoteVideoActive, let mediaSession, case .ready = phase {
                 RemoteCallVideoView(mediaSession: mediaSession)
                     .ignoresSafeArea()
             }
@@ -910,16 +916,8 @@ private struct PrivateCallView: View {
     }
 
     private func speakerButton(size: CGFloat) -> some View {
-        callControlButton(
-            title: "Speaker",
-            systemImage: "speaker.wave.2.fill",
-            isSelected: isSpeakerEnabled,
-            size: size
-        ) {
-            isSpeakerEnabled.toggle()
-            onSpeakerChanged(isSpeakerEnabled)
-        }
-        .disabled(!controlsEnabled)
+        AudioRoutePickerButton(size: size)
+            .disabled(!controlsEnabled)
     }
 
     private func endCallButton(size: CGFloat) -> some View {

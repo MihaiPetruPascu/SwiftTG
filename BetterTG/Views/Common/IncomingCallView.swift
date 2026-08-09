@@ -1,11 +1,11 @@
 import SwiftUI
 import UIKit
+import AVKit
 
 struct IncomingCallView: View {
     let coordinator: IncomingCallCoordinator
 
     @State private var isMuted = false
-    @State private var isSpeakerEnabled = true
     @State private var isCameraEnabled = false
 
     private var isConnected: Bool {
@@ -22,7 +22,7 @@ struct IncomingCallView: View {
             )
             .ignoresSafeArea()
 
-            if coordinator.isVideo,
+            if coordinator.isRemoteVideoActive,
                let mediaSession = coordinator.activeMediaSession,
                case .ready = coordinator.phase
             {
@@ -117,16 +117,8 @@ struct IncomingCallView: View {
             }
             .disabled(!isConnected)
 
-            roundButton(
-                title: "Speaker",
-                systemImage: "speaker.wave.2.fill",
-                color: isSpeakerEnabled ? .white : .white.opacity(0.18),
-                foreground: isSpeakerEnabled ? .black : .white
-            ) {
-                isSpeakerEnabled.toggle()
-                coordinator.setSpeakerEnabled(isSpeakerEnabled)
-            }
-            .disabled(!isConnected)
+            AudioRoutePickerButton(size: 60)
+                .disabled(!isConnected)
 
             if isCameraEnabled {
                 roundButton(title: "Flip", systemImage: "camera.rotate.fill", color: .white.opacity(0.18)) {
@@ -190,6 +182,37 @@ struct CallVerificationEmojiView: View {
         .padding(.vertical, 12)
         .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 18))
     }
+}
+
+struct AudioRoutePickerButton: View {
+    let size: CGFloat
+
+    var body: some View {
+        VStack(spacing: 7) {
+            SystemAudioRoutePicker()
+                .frame(width: size, height: size)
+                .background(.white.opacity(0.18), in: Circle())
+
+            Text("Speaker")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .frame(minWidth: 70)
+    }
+}
+
+private struct SystemAudioRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.prioritizesVideoDevices = false
+        picker.tintColor = .white
+        picker.activeTintColor = .white
+        picker.accessibilityLabel = "Choose audio device"
+        return picker
+    }
+
+    func updateUIView(_ picker: AVRoutePickerView, context: Context) {}
 }
 
 struct RemoteCallVideoView: UIViewRepresentable {
