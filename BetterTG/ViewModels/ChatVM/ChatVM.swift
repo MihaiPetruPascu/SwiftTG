@@ -11,12 +11,14 @@ import TDLibKit
         customChat: CustomChat,
         initialMessageId: Int64? = nil,
         movesAccessibilityFocusToInitialMessage: Bool = false,
+        messageTopic: MessageTopic? = nil,
         service: any TelegramService = TDLib.shared.service,
     ) {
         self.customChat = customChat
         self.chatId = customChat.chat.id
         self.initialMessageId = initialMessageId
         self.movesAccessibilityFocusToInitialMessage = movesAccessibilityFocusToInitialMessage
+        self.messageTopic = messageTopic
         self.initialUnreadCount = customChat.unreadCount
         self.initialLastReadInboxMessageId = customChat.lastReadInboxMessageId
         self.service = service
@@ -24,9 +26,16 @@ import TDLibKit
             chatId: customChat.chat.id,
             service: service,
             draftMessage: customChat.draftMessage,
+            topicId: messageTopic,
         )
-        self.voiceRecorder = VoiceRecordingController(chatId: customChat.chat.id, service: service)
+        self.voiceRecorder = VoiceRecordingController(
+            chatId: customChat.chat.id,
+            service: service,
+            topicId: messageTopic,
+        )
+        self.videoRecorder = TelegramVideoNoteRecorder()
         self.conversationSearch = TelegramConversationSearchStore(service: service)
+        self.favoriteStickers = TelegramFavoriteStickersStore(service: service)
         self.onlineStatus =
             if let user = customChat.user {
                 getOnlineStatus(from: user.status)
@@ -57,14 +66,21 @@ import TDLibKit
     let chatId: Int64
     let initialMessageId: Int64?
     let movesAccessibilityFocusToInitialMessage: Bool
+    /// When set, this `ChatVM` is scoped to a single thread (channel-post comments) or forum topic
+    /// within `customChat`, rather than the chat's whole history - `nil` preserves the original
+    /// full-chat behavior everywhere below.
+    let messageTopic: MessageTopic?
     let initialUnreadCount: Int
     let initialLastReadInboxMessageId: Int64
 
     let composer: MessageComposer
     let voiceRecorder: VoiceRecordingController
+    let videoRecorder: TelegramVideoNoteRecorder
     let conversationSearch: TelegramConversationSearchStore
+    let favoriteStickers: TelegramFavoriteStickersStore
 
     var actionStatus = ""
+    var isJoiningChat = false
     var onlineStatus = ""
     var highlightedMessageId: Int64?
     var scrollRequestMessageId: Int64?
@@ -118,11 +134,25 @@ import TDLibKit
     /// out from under a newer one (cancellation doesn't stop a network call already in flight).
     @ObservationIgnored var loadingMessagesGeneration = 0
     @ObservationIgnored var preparingVoiceNoteFileIds = Set<Int>()
+    @ObservationIgnored var openedViewOnceVoiceNoteMessageIds = Set<Int64>()
+    @ObservationIgnored var openingViewOnceVoiceNoteMessageIds = Set<Int64>()
     // Scroll
     @ObservationIgnored var isAtBottom = true
     var showScrollToBottomButton = false
     @ObservationIgnored var scrollViewProxy: ScrollViewProxy?
     @ObservationIgnored var cancellables = Set<AnyCancellable>()
+
+    /// Telegram has no separate "Join Group" step for channel comments - sending your first
+    /// comment on a post silently adds you to the channel's linked discussion group server-side,
+    /// unlike opening an ordinary group/channel, which does require an explicit join before
+    /// posting. Lets `ChatView` show the normal composer here even while `customChat.canJoin`.
+    var isCommentThread: Bool {
+        if case .messageTopicThread = messageTopic {
+            true
+        } else {
+            false
+        }
+    }
 
     /// Opens the chat and kicks off history loading. `ChatView` is a SwiftUI value type that gets
     /// reconstructed (and this `ChatVM` re-initialized) on every unrelated body re-evaluation of its
@@ -139,6 +169,7 @@ import TDLibKit
         refreshConversationStatus()
         refreshPinnedMessages()
         loadMessages()
+        loadThreadRootMessageIfNeeded()
         Media.shared.onChatOpen(title: customChat.chat.title)
 
         Task.main {
@@ -194,6 +225,50 @@ import TDLibKit
 
     func getOnlineStatus(from userStatus: UserStatus) -> String {
         telegramUserPresenceDescription(userStatus)
+    }
+
+    /// True when `messageTopic` is unset (ordinary full-chat mode) or `message` belongs to it -
+    /// the single check every topic-scoping filter in `ChatVM+History.swift`/`ChatVM+Publishers.swift`
+    /// funnels through, so there's one place that defines what "belongs to this thread" means.
+    func messageMatchesTopic(_ message: Message) -> Bool {
+        guard let messageTopic else { return true }
+        if message.topicId == messageTopic {
+            return true
+        }
+        // TDLib excludes a thread's own starting message (the channel post's copy in the
+        // discussion group) from `getMessageThreadHistory` - it's fetched separately via
+        // `getMessageThread`/`loadThreadRootMessageIfNeeded()` and merged into the store, but may
+        // not carry a matching `topicId` the way replies do, so it needs this explicit id check.
+        if case .messageTopicThread(let thread) = messageTopic, message.id == thread.messageThreadId {
+            return true
+        }
+        return false
+    }
+
+    /// Joins the current channel/group and refreshes `customChat.type` with the resulting
+    /// membership status - `CustomChat` isn't kept live against `updateSupergroup`/`updateBasicGroup`,
+    /// so without this the "Join" button would keep showing until the chat is reopened.
+    func joinCurrentChat() async {
+        guard !isJoiningChat else { return }
+        isJoiningChat = true
+        defer { isJoiningChat = false }
+
+        guard await (try? service.joinChat(chatId: chatId)) != nil else {
+            navigationError = "Couldn't join this chat."
+            return
+        }
+
+        switch customChat.type {
+        case .supergroup(let currentGroup):
+            guard let group = try? await service.getSupergroup(supergroupId: currentGroup.id) else { return }
+            customChat.type = .supergroup(group)
+        case .group(let currentGroup):
+            guard let group = try? await service.getBasicGroup(basicGroupId: currentGroup.id) else { return }
+            customChat.type = .group(group)
+        case .bot, .user:
+            break
+        }
+        refreshConversationStatus()
     }
 
     // MARK: Private

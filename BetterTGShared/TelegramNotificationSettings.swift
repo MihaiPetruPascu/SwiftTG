@@ -138,10 +138,10 @@ struct TelegramNotificationsView: View {
         }
         #endif
         .alert("Couldn't Load Notification Settings", isPresented: errorIsPresented) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage ?? "")
-        }
+                Button("OK") {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
     }
 
     // MARK: Private
@@ -173,7 +173,9 @@ struct TelegramNotificationsView: View {
     @MainActor private func loadSettings() async {
         var resolvedSettings = [NotificationSettingsScope: ScopeNotificationSettings]()
         var loadError: Swift.Error?
-        await withTaskGroup(of: (NotificationSettingsScope, Result<ScopeNotificationSettings, Swift.Error>).self) { group in
+        await withTaskGroup(of: (NotificationSettingsScope, Result<ScopeNotificationSettings, Swift.Error>)
+            .self)
+        { group in
             for item in telegramNotificationScopeItems {
                 group.addTask {
                     do {
@@ -252,7 +254,10 @@ private struct TelegramNotificationScopeDetailContent: View {
                     .disabled(!settings.isEnabled)
                 #if os(iOS)
                     NavigationLink {
-                        TelegramNotificationSoundPickerView(service: service, selectedSoundId: settings.soundId) { newSoundId in
+                        TelegramNotificationSoundPickerView(
+                            service: service,
+                            selectedSoundId: settings.soundId,
+                        ) { newSoundId in
                             saveSoundId(newSoundId)
                         }
                     } label: {
@@ -276,7 +281,9 @@ private struct TelegramNotificationScopeDetailContent: View {
                 Toggle("Mentions as Regular Notifications", isOn: disableMentionBinding)
                 Toggle("Pinned Messages as Regular Notifications", isOn: disablePinnedBinding)
             } footer: {
-                Text("When on, mentions and pinned messages in this scope no longer stand out from ordinary unread messages.")
+                Text(
+                    "When on, mentions and pinned messages in this scope no longer stand out from ordinary unread messages.",
+                )
             }
         }
         .task(id: settings.soundId) {
@@ -310,20 +317,13 @@ private struct TelegramNotificationScopeDetailContent: View {
     @State private var soundTitle: String?
 
     private var soundDisplayName: String {
-        if settings.soundId <= -1 { return "Default" }
-        if settings.soundId == 0 { return "Off" }
-        return soundTitle ?? "…"
-    }
-
-    private func saveSoundId(_ newSoundId: TdInt64) {
-        save(settings.withSoundId(newSoundId))
-        Task {
-            await TelegramNotificationSoundCache.refresh(
-                scope: item.scope,
-                soundId: newSoundId,
-                service: service,
-            )
+        if settings.soundId <= -1 {
+            return "Default"
         }
+        if settings.soundId == 0 {
+            return "Off"
+        }
+        return soundTitle ?? "…"
     }
 
     private var errorIsPresented: Binding<Bool> {
@@ -387,6 +387,17 @@ private struct TelegramNotificationScopeDetailContent: View {
                 ))
             },
         )
+    }
+
+    private func saveSoundId(_ newSoundId: TdInt64) {
+        save(settings.withSoundId(newSoundId))
+        Task {
+            await TelegramNotificationSoundCache.refresh(
+                scope: item.scope,
+                soundId: newSoundId,
+                service: service,
+            )
+        }
     }
 
     @MainActor private func save(_ newSettings: ScopeNotificationSettings) {

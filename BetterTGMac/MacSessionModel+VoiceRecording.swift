@@ -30,6 +30,7 @@ extension MacSessionModel {
         voiceRecordingStartedAt = Foundation.Date()
         voiceRecordingDuration = 0
         voiceRecordingWave = []
+        voiceRecordingIsViewOnce = false
         isRecordingVoice = true
         recordingTimer?.cancel()
         recordingTimer = Task { [weak self] in
@@ -45,7 +46,7 @@ extension MacSessionModel {
             action: .chatActionRecordingVoiceNote,
             businessConnectionId: nil,
             chatId: openedChatId,
-            topicId: nil,
+            topicId: openedTopic,
         )
     }
 
@@ -59,12 +60,13 @@ extension MacSessionModel {
             TelegramOutgoingFileStaging.shared.discard(fileURL: url)
         }
         if let chatId {
+            let topicId = openedChatId == chatId ? openedTopic : nil
             Task {
                 _ = try? await service.sendChatAction(
                     action: .chatActionCancel,
                     businessConnectionId: nil,
                     chatId: chatId,
-                    topicId: nil,
+                    topicId: topicId,
                 )
             }
         }
@@ -91,8 +93,10 @@ extension MacSessionModel {
         }
 
         let waveform = TelegramVoiceNoteSending.waveform(from: voiceRecordingWave)
+        let isViewOnce = voiceRecordingIsViewOnce
         let replyTo = TelegramMessageSending.replyTo(messageId: replyingToMessage?.id)
         let replyMessageId = replyingToMessage?.id
+        let topicId = openedTopic
         resetVoiceRecordingState()
         messageActionError = nil
         isSubmittingMessage = true
@@ -107,8 +111,10 @@ extension MacSessionModel {
                     caption: FormattedText(entities: [], text: ""),
                     duration: duration,
                     waveform: waveform,
+                    isViewOnce: isViewOnce,
                     replyTo: replyTo,
                     schedulingState: schedulingState,
+                    topicId: topicId,
                 )
                 clearDraft(chatId: chatId)
                 guard openedChatId == chatId, replyingToMessage?.id == replyMessageId else { return }
@@ -131,6 +137,7 @@ extension MacSessionModel {
         voiceRecordingStartedAt = nil
         voiceRecordingDuration = 0
         voiceRecordingWave = []
+        voiceRecordingIsViewOnce = false
         isRecordingVoice = false
     }
 }

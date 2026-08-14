@@ -60,6 +60,10 @@ struct TelegramStickerPresentation: Equatable {
         emoji.isEmpty ? "Sticker" : "Sticker \(emoji)"
     }
 
+    var isEditable: Bool {
+        !isPremium
+    }
+
     func pickerAccessibilityLabel(packTitle: String?) -> String {
         var parts = [isPremium ? "Premium sticker" : "Sticker"]
         if !emoji.isEmpty {

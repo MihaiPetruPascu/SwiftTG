@@ -9,9 +9,10 @@ import TDLibKit
 @MainActor @Observable final class MessageComposer {
     // MARK: Lifecycle
 
-    init(chatId: Int64, service: any TelegramService, draftMessage: DraftMessage?) {
+    init(chatId: Int64, service: any TelegramService, draftMessage: DraftMessage?, topicId: MessageTopic? = nil) {
         self.chatId = chatId
         self.service = service
+        self.topicId = topicId
         self.linkPreviewComposer = TelegramLinkPreviewComposer(service: service)
         self.editLinkPreviewComposer = TelegramLinkPreviewComposer(service: service)
         if let draftMessage,
@@ -189,6 +190,7 @@ import TDLibKit
             replyTo: getMessageReplyTo(from: replyMessage),
             uploadAction: .chatActionUploadingDocument(.init(progress: 0)),
             schedulingState: schedulingState,
+            topicId: topicId,
             onAccepted: { [chatId] messages in
                 TelegramOutgoingFileStaging.shared.register(
                     fileURLs: documentURLs,
@@ -213,6 +215,7 @@ import TDLibKit
             replyTo: getMessageReplyTo(from: replyMessage),
             uploadAction: .chatActionUploadingPhoto(.init(progress: 0)),
             schedulingState: schedulingState,
+            topicId: topicId,
             onAccepted: { [chatId] messages in
                 TelegramOutgoingFileStaging.shared.register(
                     fileURLs: imageURLs,
@@ -248,6 +251,7 @@ import TDLibKit
             contents: [content],
             replyTo: getMessageReplyTo(from: replyMessage),
             schedulingState: schedulingState,
+            topicId: topicId,
         )
     }
 
@@ -275,6 +279,7 @@ import TDLibKit
         url: URL,
         duration: Int,
         waveform: Data,
+        isViewOnce: Bool = false,
         schedulingState: MessageSchedulingState? = nil,
     ) async throws {
         try await TelegramVoiceNoteSending.send(
@@ -287,11 +292,40 @@ import TDLibKit
             ),
             duration: duration,
             waveform: waveform,
+            isViewOnce: isViewOnce,
             replyTo: getMessageReplyTo(from: replyMessage),
             schedulingState: schedulingState,
+            topicId: topicId,
         )
         await main {
             self.text = ""
+            self.replyMessage = nil
+        }
+        await updateDraft()
+    }
+
+    func sendMessageVideoNote(
+        artifact: TelegramVideoNoteRecordingArtifact,
+        schedulingState: MessageSchedulingState? = nil,
+        disableNotification: Bool = false,
+        effectId: TdInt64 = 0,
+    ) async throws {
+        try await TelegramVideoNoteSending.send(
+            service: service,
+            chatId: chatId,
+            url: artifact.url,
+            thumbnail: artifact.thumbnail,
+            preliminaryUploadFileId: artifact.preliminaryUploadFileId,
+            duration: artifact.duration,
+            length: artifact.length,
+            isViewOnce: artifact.isViewOnce,
+            replyTo: getMessageReplyTo(from: replyMessage),
+            schedulingState: schedulingState,
+            disableNotification: disableNotification,
+            effectId: effectId,
+            topicId: topicId,
+        )
+        await main {
             self.replyMessage = nil
         }
         await updateDraft()
@@ -309,7 +343,7 @@ import TDLibKit
         _ = try? await service.setChatDraftMessage(
             chatId: chatId,
             draftMessage: draftMessage,
-            topicId: nil,
+            topicId: topicId,
         )
     }
 
@@ -339,6 +373,7 @@ import TDLibKit
 
     private let chatId: Int64
     private let service: any TelegramService
+    private let topicId: MessageTopic?
 
     private func formattedText(from attributedString: AttributedString) -> FormattedText {
         FormattedText(

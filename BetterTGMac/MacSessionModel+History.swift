@@ -3,6 +3,25 @@
 import TDLibKit
 
 extension MacSessionModel {
+    /// TDLib excludes a comment thread's own starting message (the channel post's copy in the
+    /// discussion group) from `getMessageThreadHistory` - `MessagesManager` only adds a message to
+    /// the thread's local history if its thread id differs from its own id, so the root is always
+    /// missing from that call and has to be fetched separately, matching Telegram-iOS/Unigram
+    /// (both fetch it via a dedicated discussion-message lookup and splice it into the top of the
+    /// scrollback themselves). Once merged into the shared store, the next snapshot picks it up
+    /// automatically via `messageMatchesOpenedTopic`'s id check - no separate bookkeeping needed
+    /// here, unlike iOS's `loadedMessageIds`.
+    func loadThreadRootMessageIfNeeded(chatId: Int64, topic: MessageTopic?) {
+        guard case .messageTopicThread(let thread) = topic else { return }
+        Task {
+            guard let rootMessage = try? await service.getMessage(
+                chatId: chatId,
+                messageId: thread.messageThreadId,
+            ) else { return }
+            service.mergeMessageHistory(chatId: chatId, messages: [rootMessage])
+        }
+    }
+
     func loadLatestMessages() async {
         guard !isLoadingMessages,
               !isLoadingLatestMessages,
@@ -35,6 +54,16 @@ extension MacSessionModel {
         canLoadOlderMessages = !reachedBeginning
         latestHistoryTargetMessageId = newestMessage.id
         let latestMessages = Array(messagesById.values)
+        // Preserve messages that arrived while the latest page was in flight. `replaceHistory`
+        // keeps the same live tail in the store, so the presentation window must keep it too.
+        let liveTailIds = messages.messages.values.compactMap { message -> Int64? in
+            guard message.id < 0
+                || message.date > newestMessage.date
+                || (message.date == newestMessage.date && message.id > newestMessage.id)
+            else { return nil }
+            return message.id
+        }
+        loadedMessageIds = Set(messagesById.keys).union(liveTailIds)
         service.replaceMessageHistory(chatId: chatId, messages: latestMessages)
     }
 
@@ -55,12 +84,11 @@ extension MacSessionModel {
             }
         }
 
-        guard let history = try? await service.getChatHistory(
+        guard let history = try? await fetchHistoryPage(
             chatId: chatId,
             fromMessageId: anchorMessageId,
             limit: 21,
             offset: 0,
-            onlyLocal: false,
         ), !Task.isCancelled,
         openedChatId == chatId,
         historyRequestGeneration == generation
@@ -74,6 +102,7 @@ extension MacSessionModel {
             return false
         }
 
+        loadedMessageIds.formUnion(olderMessages.map(\.id))
         service.mergeMessageHistory(chatId: chatId, messages: olderMessages)
         return true
     }
@@ -82,18 +111,18 @@ extension MacSessionModel {
         let generation = historyRequestGeneration
 
         if let targetMessageId {
-            guard let history = try? await service.getChatHistory(
+            guard let history = try? await fetchHistoryPage(
                 chatId: chatId,
                 fromMessageId: targetMessageId,
                 limit: 51,
                 offset: -25,
-                onlyLocal: false,
             ), !Task.isCancelled,
             openedChatId == chatId,
             historyRequestGeneration == generation
             else { return [] }
 
             let foundMessages = history.messages ?? []
+            loadedMessageIds.formUnion(foundMessages.map(\.id))
             service.mergeMessageHistory(chatId: chatId, messages: foundMessages)
             canLoadOlderMessages = !foundMessages.isEmpty
             return foundMessages
@@ -118,6 +147,7 @@ extension MacSessionModel {
         // publishing after every single one forces a full table reload each time, turning what
         // should be one clean reveal into a visibly janky, multi-second churn.
         if !messagesById.isEmpty {
+            loadedMessageIds.formUnion(messagesById.keys)
             service.mergeMessageHistory(chatId: chatId, messages: Array(messagesById.values))
         }
         canLoadOlderMessages = !reachedBeginning && !messagesById.isEmpty
@@ -125,6 +155,43 @@ extension MacSessionModel {
     }
 
     // MARK: Private
+
+    /// Dispatches to whichever TDLib history call matches `openedTopic` - `getChatHistory` for
+    /// ordinary chats, `getMessageThreadHistory` for comment threads, `getForumTopicHistory` for
+    /// forum topics. Mirrors iOS's `ChatVM.fetchHistoryPage(fromMessageId:limit:offset:)`.
+    private func fetchHistoryPage(
+        chatId: Int64,
+        fromMessageId: Int64,
+        limit: Int,
+        offset: Int,
+    ) async throws -> Messages {
+        switch openedTopic {
+        case .messageTopicThread(let thread):
+            try await service.getMessageThreadHistory(
+                chatId: chatId,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                messageId: thread.messageThreadId,
+                offset: offset,
+            )
+        case .messageTopicForum(let forum):
+            try await service.getForumTopicHistory(
+                chatId: chatId,
+                forumTopicId: forum.forumTopicId,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset,
+            )
+        case .messageTopicDirectMessages, .messageTopicSavedMessages, nil:
+            try await service.getChatHistory(
+                chatId: chatId,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset,
+                onlyLocal: false,
+            )
+        }
+    }
 
     /// Pages backward from the newest known message, accumulating up to `targetCount` messages
     /// across at most `maxIterations` round trips. Shared by `loadLatestMessages` (bootstrap) and
@@ -139,7 +206,7 @@ extension MacSessionModel {
     private func fetchMessagesBackward(
         chatId: Int64,
         generation: UInt64,
-        targetCount: Int = 30,
+        targetCount: Int = MacSessionModel.initialHistoryWindowSize,
         maxIterations: Int = 10,
         startingFromMessageId: Int64 = 0,
     ) async -> (messages: [Int64: Message], reachedBeginning: Bool) {
@@ -155,12 +222,11 @@ extension MacSessionModel {
             else { break }
 
             let requestedCount = min(100, targetCount - messagesById.count + (fromMessageId == 0 ? 0 : 1))
-            guard let history = try? await service.getChatHistory(
+            guard let history = try? await fetchHistoryPage(
                 chatId: chatId,
                 fromMessageId: fromMessageId,
                 limit: requestedCount,
                 offset: 0,
-                onlyLocal: false,
             ) else { break }
             let newMessages = (history.messages ?? []).filter { messagesById[$0.id] == nil }
             guard !newMessages.isEmpty else {

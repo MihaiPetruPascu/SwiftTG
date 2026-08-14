@@ -98,6 +98,11 @@ extension ChatVM {
         set { voiceRecorder.recordingVoiceNote = newValue }
     }
 
+    var voiceNoteIsViewOnce: Bool {
+        get { voiceRecorder.isViewOnce }
+        set { voiceRecorder.isViewOnce = newValue }
+    }
+
     var recordingLocked: Bool {
         get { voiceRecorder.recordingLocked }
         set { voiceRecorder.recordingLocked = newValue }
@@ -119,6 +124,12 @@ extension ChatVM {
         get { voiceRecorder.wave }
         set { voiceRecorder.wave = newValue }
     }
+
+    var recordingVideoNote: Bool { videoRecorder.isRecording }
+    var pausedVideoNote: Bool { videoRecorder.isPaused }
+    var preparingVideoNote: Bool { videoRecorder.isPreparing }
+    var finalizingVideoNote: Bool { videoRecorder.isFinalizing }
+    var videoRecordingDuration: TimeInterval { videoRecorder.duration }
 
     // MARK: Sending/recording
 
@@ -163,6 +174,102 @@ extension ChatVM {
     func stopTimer() { voiceRecorder.stopTimer() }
     func mediaStartRecordingVoice() async { await voiceRecorder.mediaStartRecordingVoice() }
     func cancelRecordingVoice() { voiceRecorder.cancelRecordingVoice() }
+    func mediaStartRecordingVideo() async {
+        Media.shared.stop()
+        TelegramAudioPlayer.shared.stop()
+        TelegramVideoNotePlayer.shared.stop()
+        let allowsLiveUpload =
+            if case .chatTypeSecret = customChat.chat.type {
+                false
+            } else {
+                true
+            }
+        await videoRecorder.start(
+            service: service,
+            allowsLiveUpload: allowsLiveUpload,
+        ) { [weak self] artifact, deliveryOptions in
+            guard let self else { return }
+            Task {
+                do {
+                    try await composer.sendMessageVideoNote(
+                        artifact: artifact,
+                        schedulingState: deliveryOptions.schedulingState,
+                        disableNotification: deliveryOptions.disableNotification,
+                        effectId: deliveryOptions.effectId,
+                    )
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    messageActionError = "Video message couldn't be sent: \(telegramErrorDescription(error))"
+                }
+            }
+        }
+        if videoRecorder.isRecording {
+            _ = try? await service.sendChatAction(
+                action: .chatActionRecordingVideoNote,
+                businessConnectionId: nil,
+                chatId: chatId,
+                topicId: messageTopic,
+            )
+        }
+    }
+
+    func cancelRecordingVideo() {
+        videoRecorder.cancel()
+        Task {
+            _ = try? await service.sendChatAction(
+                action: .chatActionCancel,
+                businessConnectionId: nil,
+                chatId: chatId,
+                topicId: messageTopic,
+            )
+        }
+    }
+
+    func pauseRecordingVideo() {
+        videoRecorder.pause()
+        Task {
+            _ = try? await service.sendChatAction(
+                action: .chatActionCancel,
+                businessConnectionId: nil,
+                chatId: chatId,
+                topicId: messageTopic,
+            )
+        }
+    }
+
+    func resumeRecordingVideo() async {
+        await videoRecorder.resume()
+        guard videoRecorder.isRecording else { return }
+        Task {
+            _ = try? await service.sendChatAction(
+                action: .chatActionRecordingVideoNote,
+                businessConnectionId: nil,
+                chatId: chatId,
+                topicId: messageTopic,
+            )
+        }
+    }
+
+    func mediaStopRecordingVideo(
+        schedulingState: MessageSchedulingState? = nil,
+        disableNotification: Bool = false,
+        effectId: TdInt64 = 0,
+    ) {
+        videoRecorder.stop(
+            schedulingState: schedulingState,
+            disableNotification: disableNotification,
+            effectId: effectId,
+        )
+        Task {
+            _ = try? await service.sendChatAction(
+                action: .chatActionCancel,
+                businessConnectionId: nil,
+                chatId: chatId,
+                topicId: messageTopic,
+            )
+        }
+    }
+
     func mediaStopRecordingVoice(duration: Int, wave: [Float], schedulingState: MessageSchedulingState? = nil) {
         guard let artifact = voiceRecorder.mediaStopRecordingVoice(duration: duration, wave: wave) else { return }
         Task.background {
@@ -171,6 +278,7 @@ extension ChatVM {
                     url: artifact.url,
                     duration: artifact.duration,
                     waveform: artifact.waveform,
+                    isViewOnce: artifact.isViewOnce,
                     schedulingState: schedulingState,
                 )
             } catch {

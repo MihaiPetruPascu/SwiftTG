@@ -1,9 +1,7 @@
 // MacSessionModel.swift
 
-import AppKit
 import AVFoundation
 import Combine
-import Foundation
 import SwiftUI
 import TDLibKit
 import UniformTypeIdentifiers
@@ -16,9 +14,11 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     case .updateBasicGroup,
          .updateBasicGroupFullInfo,
          .updateChatAction,
+         .updateFavoriteStickers,
          .updateNotificationGroup,
          .updateSupergroup,
          .updateSupergroupFullInfo,
+         .updateUnconfirmedSession,
          .updateUser,
          .updateUserStatus:
         true
@@ -39,6 +39,8 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
         self.linkPreviewComposer = TelegramLinkPreviewComposer(service: session)
         self.editLinkPreviewComposer = TelegramLinkPreviewComposer(service: session)
         self.conversationSearch = TelegramConversationSearchStore(service: session)
+        self.favoriteStickers = TelegramFavoriteStickersStore(service: session)
+        self.videoRecorder = TelegramVideoNoteRecorder()
         self.pushNotifications = TelegramApplePushRegistration(
             service: session,
             isAppSandbox: Self.isAppSandbox,
@@ -47,6 +49,12 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     }
 
     // MARK: Internal
+
+    /// Matches the first page assembled by `fetchMessagesBackward`. The shared macOS message
+    /// store intentionally retains every explicitly loaded page, but mounting that entire retained
+    /// history when a chat is reopened can make SwiftUI's `List` synchronously build thousands of
+    /// rows. `loadedMessageIds` below keeps the presented window bounded until the user paginates.
+    static let initialHistoryWindowSize = 30
 
     var authorizationState: AuthorizationState?
     var authorizationStatus = "Starting Telegram…"
@@ -59,6 +67,18 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     var selectedChatFolderId = MacChatFolderID.main
     var focusedChatId: Int64?
     var openedChatId: Int64?
+    /// When set, `openedChatId` is scoped to a single forum topic or comment thread rather than
+    /// the chat's whole history - `nil` preserves ordinary full-chat behavior everywhere below.
+    /// Mirrors iOS's `ChatVM.messageTopic`.
+    var openedTopic: MessageTopic?
+    /// Display name for `openedTopic`, shown in `MacConversationHeader` instead of the parent
+    /// chat's name while a forum topic is open - `nil` whenever `openedTopic` is.
+    var openedTopicTitle: String?
+    /// Set while `openedChatId`/`openedTopic` point at a comment thread reached from a different
+    /// chat (a channel's linked discussion group) - `closeOpenedTopic()` uses this to return to
+    /// that chat specifically, rather than just clearing `openedTopic` the way leaving a forum
+    /// topic does (which stays within the same chat).
+    var commentThreadReturnChatId: Int64?
     var messages = TelegramMessageSnapshot.empty(chatId: 0)
     var editingMessage: Message?
     var replyingToMessage: Message?
@@ -78,6 +98,8 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     var detectedChatLanguage: String?
     var isChatTranslationEnabled = false
     var messageActionError: String?
+    var openedViewOnceVoiceNoteMessageIds = Set<Int64>()
+    var openingViewOnceVoiceNoteMessageIds = Set<Int64>()
     var isAddingContact = false
     var isSubmittingMessage = false
     var selectedDocumentURLs = [URL]()
@@ -103,9 +125,11 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     var isLoadingLatestMessages = false
     var canLoadOlderMessages = true
     var isRecordingVoice = false
+    var voiceRecordingIsViewOnce = false
     var voiceRecordingDuration: TimeInterval = 0
     var searchQuery = ""
     var chatSearchResults = [MacChatSearchResult]()
+    var globalChatSearchResults = [MacChatSearchResult]()
     var messageSearchResults = [MacMessageSearchResult]()
     var focusedSearchResult: MacSearchResultID?
     var isSearching = false
@@ -121,10 +145,18 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     var openedLastReadInboxMessageId: Int64 = 0
     var conversationHeaderBaseStatus: String?
     var conversationHeaderActivities = [MessageSender: ChatAction]()
+    var deepLinkErrorMessage: String?
+    var pendingDeepLinkJoin: TelegramPendingDeepLinkJoin?
+    var unconfirmedSession: UnconfirmedSession?
+    var unconfirmedSessionActionError: String?
+    var showsDeniedSessionNotice = false
+    var isProcessingUnconfirmedSession = false
 
     let linkPreviewComposer: TelegramLinkPreviewComposer
     let editLinkPreviewComposer: TelegramLinkPreviewComposer
     let conversationSearch: TelegramConversationSearchStore
+    let favoriteStickers: TelegramFavoriteStickersStore
+    let videoRecorder: TelegramVideoNoteRecorder
 
     @ObservationIgnored var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored var loadedChatFolderIds = Set<MacChatFolderID>()
@@ -135,6 +167,7 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
     @ObservationIgnored var scheduledMessagesTask: Task<Void, Never>?
     @ObservationIgnored var scheduledMessagesGeneration: UInt64 = 0
     @ObservationIgnored var historyRequestGeneration: UInt64 = 0
+    @ObservationIgnored var loadedMessageIds = Set<Int64>()
     @ObservationIgnored var service: any TelegramService
     @ObservationIgnored var draftReplyLoadTask: Task<Void, Never>?
 
@@ -224,6 +257,7 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
         isStopping = true
         pushNotifications.stop()
         cancelVoiceRecording()
+        videoRecorder.cancel()
         historyRequestGeneration &+= 1
         conversationHeaderTask?.cancel()
         selectedPhotoURLs = []
@@ -356,6 +390,19 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
             }
             .store(in: &cancellables)
 
+        // Nothing else updates the Dock badge - it otherwise stays wherever it last was (or
+        // permanently unset), since reading messages while the app is open never touches it on
+        // its own. `unreadUnmutedCount` matches the official app's own badge convention of
+        // excluding muted chats.
+        service.unreadChatCountPublisher
+            .compactMap { $0?.unreadUnmutedCount }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { count in
+                NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+            }
+            .store(in: &cancellables)
+
         service.updatePublisher
             // Filter on TelegramUpdateStore's background queue, before `receive(on:)` schedules
             // work on AppKit's event loop. The two handlers below ignore every other update type.
@@ -364,6 +411,10 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
                 .sink { [weak self] update in
                     self?.handleNotificationUpdate(update)
                     self?.handleConversationHeaderUpdate(update)
+                    self?.handleUnconfirmedSessionUpdate(update)
+                    if case .updateFavoriteStickers(let value) = update {
+                        self?.favoriteStickers.apply(value)
+                    }
                 }
                 .store(in: &cancellables)
     }
@@ -459,6 +510,9 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
         selectedChatFolderId = .main
         focusedChatId = nil
         openedChatId = nil
+        openedTopic = nil
+        openedTopicTitle = nil
+        commentThreadReturnChatId = nil
         openedChatType = nil
         conversationHeaderBaseStatus = nil
         conversationHeaderActivities = [:]
@@ -468,6 +522,7 @@ private func isMacSessionPresentationUpdate(_ update: Update) -> Bool {
         scheduledMessagesError = nil
         isLoadingPinnedMessages = false
         messages = .empty(chatId: 0)
+        loadedMessageIds = []
         loadedChatFolderIds = []
         messageText = NSAttributedString(string: "")
         editMessageText = NSAttributedString(string: "")

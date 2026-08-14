@@ -24,6 +24,16 @@ extension ChatVM {
                 Task { @MainActor in self?.updateConversationStatus(update) }
             }
             .store(in: &cancellables)
+        service.updatePublisher
+            .compactMap { update -> UpdateFavoriteStickers? in
+                guard case .updateFavoriteStickers(let value) = update else { return nil }
+                return value
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] update in
+                Task { @MainActor in self?.favoriteStickers.apply(update) }
+            }
+            .store(in: &cancellables)
     }
 
     @MainActor private func updateConversationStatus(_ update: Update) {
@@ -59,7 +69,9 @@ extension ChatVM {
         appliedMessageSnapshotVersion = snapshot.version
         latestMessageSnapshot = snapshot
         if loadedMessageIds.isEmpty, initialMessageId == nil, snapshot.hasMergedHistory {
-            loadedMessageIds.formUnion(snapshot.orderedMessageIds.suffix(30))
+            let matchingIds = snapshot.orderedMessageIds
+                .filter { snapshot.messages[$0].map(messageMatchesTopic) ?? false }
+            loadedMessageIds.formUnion(matchingIds.suffix(30))
         }
         renderStore.completeRefreshesIfMerged(messages: snapshot.messages)
 
@@ -76,11 +88,13 @@ extension ChatVM {
             customChat.lastReadOutboxMessageId = value.lastReadOutboxMessageId
             reconcileMessages(with: snapshot)
         case .newMessage(let value):
-            if !value.message.isOutgoing {
-                ServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: customChat.isMuted)
+            if messageMatchesTopic(value.message) {
+                if !value.message.isOutgoing {
+                    ServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: customChat.isMuted)
+                }
+                loadedMessageIds.insert(value.message.id)
+                pendingScrollMessageIds.insert(value.message.id)
             }
-            loadedMessageIds.insert(value.message.id)
-            pendingScrollMessageIds.insert(value.message.id)
             reconcileMessages(with: snapshot)
         case .deleteMessages:
             reconcileMessages(with: snapshot)
@@ -98,6 +112,10 @@ extension ChatVM {
             refreshMessage(messageId: value.messageId, version: snapshot.version)
             refreshPinnedMessages()
         case .messageSendSucceeded(let value):
+            guard messageMatchesTopic(value.message) else {
+                reconcileMessages(with: snapshot)
+                return
+            }
             if value.message.isOutgoing {
                 ServiceSoundManager.shared.playMessageDelivered()
             }
@@ -113,6 +131,10 @@ extension ChatVM {
             }
             reconcileMessages(with: snapshot)
         case .messageSendFailed(let value):
+            guard messageMatchesTopic(value.message) else {
+                reconcileMessages(with: snapshot)
+                return
+            }
             messageActionError = "Message couldn't be sent: \(telegramErrorDescription(value.error))"
             loadedMessageIds.insert(value.message.id)
             renderedMessages.removeValue(forKey: value.oldMessageId)
@@ -124,6 +146,7 @@ extension ChatVM {
         case .userStatus(let value):
             withAnimation { onlineStatus = getOnlineStatus(from: value.status) }
         case .chatAction(let value):
+            guard messageTopic == nil || value.topicId == messageTopic else { return }
             updateChatAction(value)
         case .historyMerged:
             reconcileMessages(with: snapshot)
@@ -199,7 +222,7 @@ extension ChatVM {
                 messageText.text
             case .messageAudio, .messageDocument, .messagePhoto, .messageVideo, .messageVoiceNote:
                 telegramMessageFormattedText(message)
-            case .messagePoll, .messageSticker:
+            case .messagePoll, .messageSticker, .messageVideoNote:
                 nil
             default:
                 FormattedText(entities: [], text: telegramMessageContentDescription(message))

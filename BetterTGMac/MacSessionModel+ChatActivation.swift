@@ -26,7 +26,12 @@ extension MacSessionModel {
         activateChat(focusedChatId)
     }
 
-    func activateChat(_ chatId: Int64, messageId: Int64? = nil) {
+    /// `topic` scopes the opened chat to a single forum topic or comment thread (mirrors iOS's
+    /// `ChatVM.messageTopic`) - `nil` is an ordinary full-chat open. Switching `topic` alone, with
+    /// `chatId` unchanged (e.g. moving between two topics of the same forum group), goes through
+    /// the same full reset/resubscribe path as switching chats entirely, since the message list,
+    /// composer, and history-loading state all need to start over either way.
+    func activateChat(_ chatId: Int64, messageId: Int64? = nil, topic: MessageTopic? = nil, topicTitle: String? = nil) {
         if openedChatId != chatId, isConversationSearchActive {
             endConversationSearch()
         }
@@ -34,7 +39,7 @@ extension MacSessionModel {
         focusedChatId = chatId
         latestHistoryTargetMessageId = nil
         navigationTargetMessageId = messageId
-        if openedChatId == chatId {
+        if openedChatId == chatId, openedTopic == topic {
             guard let messageId, messages.messages[messageId] == nil else { return }
             historyRequestGeneration &+= 1
             let generation = historyRequestGeneration
@@ -62,9 +67,12 @@ extension MacSessionModel {
 
         let previousChatId = openedChatId
         openedChatId = chatId
+        openedTopic = topic
+        openedTopicTitle = topicTitle
         pinnedMessages = []
         pinnedMessagesError = nil
         refreshPinnedMessages(for: chatId)
+        loadThreadRootMessageIfNeeded(chatId: chatId, topic: topic)
         restoreDraft(openingChat?.draftMessage, chatId: chatId)
         prepareConversationHeader(for: chatId, fallbackKind: openingChat?.kind)
         messages = .empty(chatId: chatId)
@@ -81,6 +89,7 @@ extension MacSessionModel {
         translationShownMessageIds = []
         translatingMessageIds = []
         messageTranslationEligibility = [:]
+        loadedMessageIds = []
         detectedChatLanguage = nil
         isChatTranslationEnabled = TelegramChatTranslationPreferences.isEnabled(chatId: chatId)
         isLoadingMessages = true
@@ -138,6 +147,43 @@ extension MacSessionModel {
             chatList.items[chat.id] = ChatListItemState(chat, membership: membership)
         }
         activateChat(chat.id, messageId: messageId)
+    }
+
+    /// Opens a channel post's comment thread, which lives in the channel's linked discussion
+    /// group - a genuinely different chat, possibly one `chatList` doesn't know about yet if the
+    /// user has never opened it directly (mirrors `activateResolvedChat`'s on-demand registration).
+    /// Matches iOS's `TelegramCommentsChatView`: the thread is resolved before this is called, so
+    /// there's no empty screen that fills in afterward.
+    func openCommentThread(discussionChatId: Int64, messageThreadId: Int64, title: String) async {
+        if chatList.items[discussionChatId] == nil {
+            guard let chat = try? await service.getChat(chatId: discussionChatId) else {
+                messageActionError = "Couldn't load this discussion."
+                return
+            }
+            service.mergeChatListChats([chat])
+            let membership = await service.resolveMembership(for: chat)
+            chatList.items[discussionChatId] = ChatListItemState(chat, membership: membership)
+        }
+        if commentThreadReturnChatId == nil {
+            commentThreadReturnChatId = openedChatId
+        }
+        activateChat(
+            discussionChatId,
+            topic: .messageTopicThread(MessageTopicThread(messageThreadId: messageThreadId)),
+            topicTitle: title,
+        )
+    }
+
+    /// Leaves the currently open forum topic or comment thread - back to the same chat's topic
+    /// list for a forum topic, or back to the channel a comment thread was opened from.
+    func closeOpenedTopic() {
+        guard let openedChatId else { return }
+        if let returnChatId = commentThreadReturnChatId {
+            commentThreadReturnChatId = nil
+            activateChat(returnChatId, topic: nil)
+        } else {
+            activateChat(openedChatId, topic: nil)
+        }
     }
 
     func navigateToRepliedMessage(from message: Message) {
@@ -240,6 +286,58 @@ extension MacSessionModel {
 
     // MARK: Private
 
+    /// True when `openedTopic` is unset (ordinary full-chat mode) or `message` belongs to it -
+    /// mirrors iOS's `ChatVM.messageMatchesTopic(_:)`.
+    private func messageMatchesOpenedTopic(_ message: Message) -> Bool {
+        guard let openedTopic else { return true }
+        if message.topicId == openedTopic {
+            return true
+        }
+        // TDLib excludes a thread's own starting message (the channel post's copy in the
+        // discussion group) from `getMessageThreadHistory` - it's fetched separately via
+        // `loadThreadRootMessageIfNeeded()` and merged into the store, but may not carry a
+        // matching `topicId` the way replies do, so it needs this explicit id check.
+        if case .messageTopicThread(let thread) = openedTopic, message.id == thread.messageThreadId {
+            return true
+        }
+        return false
+    }
+
+    /// Restricts a snapshot to `openedTopic`'s messages - the shared store publishes every message
+    /// in the chat regardless of thread/topic, so a comment thread or forum topic needs this
+    /// filter applied before anything (row list, unread count) reads from it.
+    private func presentationSnapshot(from snapshot: TelegramMessageSnapshot) -> TelegramMessageSnapshot {
+        let topicMessageIds =
+            if openedTopic == nil {
+                snapshot.orderedMessageIds
+            } else {
+                snapshot.orderedMessageIds.filter {
+                    snapshot.messages[$0].map(messageMatchesOpenedTopic) ?? false
+                }
+            }
+
+        // A CurrentValueSubject immediately replays the store's retained snapshot to a new chat
+        // subscription. Seed only a first screenful from that replay; older ids become visible
+        // explicitly through `loadOlderMessages()` instead of all being mounted in one List diff.
+        if loadedMessageIds.isEmpty {
+            loadedMessageIds.formUnion(topicMessageIds.suffix(Self.initialHistoryWindowSize))
+        }
+
+        let filteredIds = topicMessageIds.filter(loadedMessageIds.contains)
+        let filteredMessages = Dictionary(uniqueKeysWithValues: filteredIds.compactMap { messageId in
+            snapshot.messages[messageId].map { (messageId, $0) }
+        })
+        return TelegramMessageSnapshot(
+            chatId: snapshot.chatId,
+            version: snapshot.version,
+            messages: filteredMessages,
+            orderedMessageIds: filteredIds,
+            unreadCount: snapshot.unreadCount,
+            hasMergedHistory: snapshot.hasMergedHistory,
+            change: snapshot.change,
+        )
+    }
+
     private func handleMessageSnapshot(_ snapshot: TelegramMessageSnapshot) {
         switch snapshot.change {
         case .chatAction, .readInbox, .readOutbox, .userStatus:
@@ -253,17 +351,36 @@ extension MacSessionModel {
         default:
             break
         }
-        messages = snapshot
+
+        // Keep live row identity in the presented window while still excluding retained history
+        // that this conversation instance has not paged into.
         switch snapshot.change {
-        case .newMessage(let update) where !update.message.isOutgoing:
+        case .newMessage(let update) where messageMatchesOpenedTopic(update.message):
+            loadedMessageIds.insert(update.message.id)
+        case .messageSendSucceeded(let update) where messageMatchesOpenedTopic(update.message):
+            loadedMessageIds.remove(update.oldMessageId)
+            loadedMessageIds.insert(update.message.id)
+        case .messageSendFailed(let update) where messageMatchesOpenedTopic(update.message):
+            loadedMessageIds.remove(update.oldMessageId)
+            loadedMessageIds.insert(update.message.id)
+        case .deleteMessages(let update):
+            loadedMessageIds.subtract(update.messageIds)
+        default:
+            break
+        }
+
+        messages = presentationSnapshot(from: snapshot)
+        switch snapshot.change {
+        case .newMessage(let update) where !update.message.isOutgoing && messageMatchesOpenedTopic(update.message):
             let isMuted = (chatList.items[snapshot.chatId]?.notificationSettings?.muteFor ?? 0) > 0
             MacServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: isMuted)
             if isChatTranslationEnabled {
                 ensureTranslation(for: update.message)
             }
-        case .messageSendSucceeded(let update) where update.message.isOutgoing:
+        case .messageSendSucceeded(let update)
+            where update.message.isOutgoing && messageMatchesOpenedTopic(update.message):
             MacServiceSoundManager.shared.playMessageDelivered()
-        case .messageSendFailed(let update):
+        case .messageSendFailed(let update) where messageMatchesOpenedTopic(update.message):
             messageActionError = "Message couldn't be sent: \(telegramErrorDescription(update.error))"
         default:
             break

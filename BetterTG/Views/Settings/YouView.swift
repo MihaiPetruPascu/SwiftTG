@@ -26,20 +26,30 @@ struct YouView: View {
                 }
             }
 
-            Section("Settings") {
+            Section {
                 Button {
                     showsEditProfile = true
                 } label: {
                     Label("Edit Profile", systemImage: "person.crop.circle")
                 }
                 .foregroundStyle(.primary)
+            }
 
-                NavigationLink {
-                    BlockedUsersView(service: service)
-                } label: {
-                    Label("Blocked Users", systemImage: "hand.raised.slash")
+            if let proxyStatus = proxyStatusStore.shortcutStatus {
+                Section {
+                    NavigationLink {
+                        TelegramProxySettingsView(service: service)
+                    } label: {
+                        LabeledContent {
+                            Text(proxyStatus.value)
+                        } label: {
+                            Label("Proxy", systemImage: "network")
+                        }
+                    }
                 }
+            }
 
+            Section {
                 NavigationLink {
                     ActiveSessionsView(service: service)
                 } label: {
@@ -47,9 +57,29 @@ struct YouView: View {
                 }
 
                 NavigationLink {
+                    TelegramChatFoldersView(service: service)
+                } label: {
+                    Label("Chat Folders", systemImage: "folder")
+                }
+            }
+
+            Section {
+                NavigationLink {
                     TelegramNotificationsView(service: service)
                 } label: {
                     Label("Notifications and Sounds", systemImage: "bell")
+                }
+
+                NavigationLink {
+                    TelegramPrivacyView(service: service)
+                } label: {
+                    Label("Privacy and Security", systemImage: "hand.raised")
+                }
+
+                NavigationLink {
+                    TelegramStorageSettingsView(service: service)
+                } label: {
+                    Label("Data and Storage", systemImage: "internaldrive")
                 }
 
                 NavigationLink {
@@ -57,41 +87,17 @@ struct YouView: View {
                 } label: {
                     Label("Appearance", systemImage: "paintpalette")
                 }
-
-                NavigationLink {
-                    TelegramPrivacyView(service: service)
-                } label: {
-                    Label("Privacy", systemImage: "hand.raised")
-                }
-
-                NavigationLink {
-                    TelegramTwoStepVerificationView(service: service)
-                } label: {
-                    Label("Two-Step Verification", systemImage: "lock.shield")
-                }
-
-                NavigationLink {
-                    TelegramAppLockSettingsView()
-                } label: {
-                    Label("App Lock", systemImage: "lock")
-                }
-
-                NavigationLink {
-                    TelegramStorageSettingsView(service: service)
-                } label: {
-                    Label("Storage Usage", systemImage: "internaldrive")
-                }
-
-                NavigationLink {
-                    TelegramProxySettingsView(service: service)
-                } label: {
-                    Label("Proxy", systemImage: "network")
-                }
             }
         }
         .navigationTitle("You")
-        .task { await loadProfile() }
-        .refreshable { await loadProfile() }
+        .task {
+            await loadProfile()
+            await proxyStatusStore.refresh(service: service)
+        }
+        .refreshable {
+            await loadProfile()
+            await proxyStatusStore.refresh(service: service)
+        }
         .sheet(isPresented: $showsEditProfile, onDismiss: { Task { await loadProfile() } }) {
             EditProfileView(service: service, showsCancelButton: true)
         }
@@ -110,6 +116,7 @@ struct YouView: View {
     @State private var user: User?
 
     private let service: any TelegramService
+    private let proxyStatusStore = TelegramProxyStatusStore.shared
 
     private var errorIsPresented: Binding<Bool> {
         Binding(

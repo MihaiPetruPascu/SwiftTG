@@ -9,18 +9,27 @@ struct MessageView: View {
     let customMessage: CustomMessage
 
     @Environment(ChatVM.self) var chatVM
+    @Environment(\.telegramBubbleCornerRadius) var bubbleCornerRadius
     @State var shownAlbum: CustomMessageAlbum?
     @State var media = Media.shared
     @State var audioPlayer = TelegramAudioPlayer.shared
+    @State var videoNotePlayer = TelegramVideoNotePlayer.shared
     @State var voiceNoteLocalPath: String?
     @State var showDeleteOptions = false
     @State var showReactionOptions = false
     @State var showReactionDetails = false
+    @State var isLoadingComments = false
+    @State var resolvedComments: TelegramResolvedCommentsThread?
+    @State var commentsErrorMessage: String?
     @State var isSavingDocument = false
+    @State var isSavingGif = false
     @State var isAddingContact = false
     @State var documentTransferStatus: String?
     @State var documentDownloadIsPaused = false
     @State var documentDownloadCancellationTask: Task<Void, Never>?
+    @State var selectedStickerPack: TelegramStickerPackReference?
+    @State var pendingStickerFromPack: Sticker?
+    @State var stickerToEdit: Sticker?
 
     var accessibilityDescription: String {
         var prefix = ""
@@ -68,7 +77,20 @@ struct MessageView: View {
         }
         if let voiceNote = customMessage.messageVoiceNote {
             let elapsed = media.savedMediaPath == voiceNoteLocalPath ? Int(media.currentTime) : 0
+            let presentation = TelegramVoiceNotePresentation(
+                message: customMessage.message,
+                content: voiceNote,
+            )
+            if presentation.isViewOnce {
+                parts.append("view once")
+            }
             parts.append(telegramVoicePlaybackDescription(duration: voiceNote.voiceNote.duration, elapsed: elapsed))
+        }
+        if let videoNote = customMessage.messageVideoNote {
+            parts.append(TelegramVideoNotePresentation(
+                videoNote,
+                isOutgoing: customMessage.message.isOutgoing,
+            ).accessibilityDetails)
         }
         if let messageAudio = customMessage.messageAudio {
             let elapsed = audioPlayer.currentFileId == messageAudio.audio.audio.id
@@ -406,6 +428,14 @@ struct MessageView: View {
             ))
         }
 
+        if chatVM.customChat.kind == .channel, let replyInfo = customMessage.message.interactionInfo?.replyInfo {
+            pieces.append(AnyView(
+                TelegramCommentsBar(replyCount: replyInfo.replyCount, isLoading: isLoadingComments) {
+                    openComments()
+                },
+            ))
+        }
+
         return pieces
     }
 
@@ -447,6 +477,7 @@ struct MessageView: View {
         if customMessage.messageDocument != nil
             || customMessage.messagePhoto != nil
             || customMessage.messageVideo != nil
+            || customMessage.messageVideoNote != nil
             || customMessage.messageVoiceNote != nil
             || customMessage.messageAudio != nil
             || customMessage.messageSticker != nil
@@ -462,6 +493,10 @@ struct MessageView: View {
                     onMediaTap: openAlbum,
                     onContactTap: activateContact,
                     onLocationTap: activateLocation,
+                    onVoiceNoteToggle: {
+                        guard let content = customMessage.messageVoiceNote else { return }
+                        toggleVoiceMessage(content)
+                    },
                     onVoiceNoteLocalPathResolved: { voiceNoteLocalPath = $0 },
                     onDocumentTransferStatusChange: { documentTransferStatus = $0 },
                     documentDownloadIsPaused: documentDownloadIsPaused,
@@ -496,7 +531,7 @@ struct MessageView: View {
                 messageBubbleColor
             }
         }
-        .clipShape(.rect(cornerRadius: 20))
+        .clipShape(.rect(cornerRadius: bubbleCornerRadius))
         .contextMenu {
             messageContextMenu
         }
@@ -527,6 +562,48 @@ struct MessageView: View {
                     chatId: customMessage.message.chatId,
                     messageId: customMessage.id,
                 )
+            }
+            .sheet(item: $resolvedComments) { resolvedThread in
+                TelegramCommentsChatView(resolvedThread: resolvedThread)
+            }
+            .sheet(item: $selectedStickerPack) { reference in
+                TelegramStickerPackPreview(
+                    reference: reference,
+                    service: chatVM.service,
+                    chatId: customMessage.message.chatId,
+                    onSelect: { pendingStickerFromPack = $0 },
+                    preview: { sticker in
+                        TelegramStickerView(
+                            sticker: sticker,
+                            service: chatVM.service,
+                            maxSide: 76,
+                            playsAnimation: false,
+                        )
+                    },
+                )
+            }
+            .sheet(item: $stickerToEdit) { sticker in
+                TelegramStickerEditor(
+                    sticker: sticker,
+                    service: chatVM.service,
+                    chatId: customMessage.message.chatId,
+                    actionTitle: "Send",
+                    onSave: { output, emojis in
+                        try await TelegramStickerEditing.sendEditedSticker(
+                            output: output,
+                            emojis: emojis,
+                            service: chatVM.service,
+                            chatId: customMessage.message.chatId,
+                            topicId: chatVM.messageTopic,
+                        )
+                    },
+                )
+            }
+            .task(id: pendingStickerFromPack?.sticker.id) { await sendPendingStickerFromPack() }
+            .alert("Couldn't Open Comments", isPresented: commentsErrorIsPresented) {
+                Button("OK") {}
+            } message: {
+                Text(commentsErrorMessage ?? "")
             }
             .alert("Delete message?", isPresented: $showDeleteOptions) {
                 if customMessage.properties.canBeDeletedOnlyForSelf {
@@ -612,6 +689,13 @@ struct MessageView: View {
             .accessibilityIdentifier("message-\(customMessage.id)")
             .accessibilityLabel(accessibilityDescription)
             .accessibilityValue(documentTransferStatus ?? "")
+            .modify {
+                if let messageVideoNote = customMessage.messageVideoNote {
+                    $0
+                        .onTapGesture { toggleVideoMessage(messageVideoNote) }
+                        .accessibilityAddTraits(.startsMediaSession)
+                }
+            }
             .modify {
                 if let messageVoiceNote = customMessage.messageVoiceNote {
                     $0
@@ -704,11 +788,22 @@ struct MessageView: View {
     private func toggleVoiceMessage(_ messageVoiceNote: MessageVoiceNote) {
         Task { @MainActor in
             if let resolvedPath = await chatVM.toggleVoiceMessage(
-                messageVoiceNote,
+                message: customMessage.message,
+                content: messageVoiceNote,
                 knownLocalPath: voiceNoteLocalPath,
             ) {
                 voiceNoteLocalPath = resolvedPath
             }
         }
+    }
+
+    private func toggleVideoMessage(_ messageVideoNote: MessageVideoNote) {
+        Media.shared.stop()
+        audioPlayer.stop()
+        videoNotePlayer.toggle(
+            message: customMessage.message,
+            content: messageVideoNote,
+            service: chatVM.service,
+        )
     }
 }

@@ -21,15 +21,19 @@ struct ChatView: View {
         customChat: CustomChat,
         initialMessageId: Int64? = nil,
         movesAccessibilityFocusToInitialMessage: Bool = false,
+        messageTopic: MessageTopic? = nil,
         backButtonTitleOverride: String? = nil,
+        titleOverride: String? = nil,
     ) {
         let chatVM = ChatVM(
             customChat: customChat,
             initialMessageId: initialMessageId,
             movesAccessibilityFocusToInitialMessage: movesAccessibilityFocusToInitialMessage,
+            messageTopic: messageTopic,
         )
         self._chatVM = State(wrappedValue: chatVM)
         self.backButtonTitleOverride = backButtonTitleOverride
+        self.titleOverride = titleOverride
     }
 
     // MARK: Internal
@@ -48,24 +52,31 @@ struct ChatView: View {
     /// comments in ChatInfoDetailViews.swift), so without this the back button falls back to a
     /// misleading "Chats" even though back doesn't actually go to the chat list.
     let backButtonTitleOverride: String?
+
+    /// Telegram-iOS shows "N Comments" as the nav title for a comment thread rather than the
+    /// underlying discussion group's own name, even though it's mechanically the same chat
+    /// screen - set by `TelegramCommentsChatView` to match.
+    let titleOverride: String?
     
     var body: some View {
         @Bindable var chatVM = chatVM
+        @Bindable var videoNotePlayer = TelegramVideoNotePlayer.shared
         VStack(spacing: 0) {
             if chatVM.isConversationSearchActive {
                 conversationSearchField
                 Divider()
-            } else if chatVM.showsChatTranslationBanner || chatVM.isChatTranslationEnabled {
-                chatTranslationBanner
-                Divider()
-            } else if chatVM.currentPinnedMessage != nil {
-                pinnedMessageBanner
-                Divider()
+            } else {
+                ChatTopBannerView(chatVM: chatVM) {
+                    showsPinnedMessages = true
+                }
             }
 
             ScrollViewReader { scrollViewProxy in
                 bodyView
-                    .task { chatVM.start() }
+                    .task {
+                        chatVM.start()
+                        await chatVM.favoriteStickers.load()
+                    }
                     .onAppear {
                         chatVM.scrollViewProxy = scrollViewProxy
                         positionInitialMessagesIfNeeded()
@@ -98,6 +109,13 @@ struct ChatView: View {
                         .padding(8)
                 }
             }
+            .overlay {
+                if chatVM.videoRecorder.usesScreenFlash {
+                    Color.white
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             // `.overlay` alone doesn't create a new accessibility grouping level - without this,
             // VoiceOver still treats the button as a sibling of the composer below (since overlaid
             // content is flattened to the same level as its base view), regardless of which SwiftUI
@@ -108,11 +126,13 @@ struct ChatView: View {
             if chatVM.isConversationSearchActive {
                 conversationSearchNavigationBar
             } else if !isPreview {
-                if chatVM.customChat.canPostMessages {
+                if chatVM.customChat.canPostMessages || chatVM.isCommentThread {
                     ChatBottomArea(focused: $focused) {
                         guard let message = chatVM.messageActionError else { return }
                         presentedActionError = PresentedChatActionError(message: message)
                     }
+                } else if chatVM.customChat.canJoin {
+                    joinChatButton
                 } else if chatVM.customChat.kind == .channel {
                     Text("Only channel administrators can post.")
                         .font(.callout)
@@ -125,7 +145,9 @@ struct ChatView: View {
         }
         .background(.black)
         .ignoresSafeArea(.container, edges: .top)
-        .navigationTitle(chatVM.isConversationSearchActive ? "" : chatVM.customChat.displayTitle)
+        .navigationTitle(
+            chatVM.isConversationSearchActive ? "" : (titleOverride ?? chatVM.customChat.displayTitle),
+        )
         .navigationBarBackButtonHidden(true)
         .dropDestination(for: SelectedImage.self) { items, _ in
             nc.post(name: .localOnSelectedImagesDrop, object: Array(items.prefix(10)))
@@ -209,6 +231,9 @@ struct ChatView: View {
             PinnedMessagesView()
                 .environment(chatVM)
         }
+        .fullScreenCover(isPresented: $videoNotePlayer.isPresentingViewOnce) {
+            TelegramViewOnceVideoNotePlayerView(player: videoNotePlayer)
+        }
         .environment(chatVM)
     }
     
@@ -232,7 +257,8 @@ struct ChatView: View {
         .contentMargins(.bottom, 0, for: .scrollContent)
         .defaultScrollAnchor(.bottom)
         .scrollPosition($initialScrollPosition)
-        .background(.black)
+        .telegramChatWallpaper()
+        .telegramMessageTextSize()
         .scrollDismissesKeyboard(.interactively)
         .scrollBounceBehavior(.always)
         .scrollIndicators(.hidden)
@@ -265,6 +291,27 @@ struct ChatView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+    }
+
+    var joinChatButton: some View {
+        Button {
+            Task { await chatVM.joinCurrentChat() }
+        } label: {
+            HStack {
+                Spacer()
+                if chatVM.isJoiningChat {
+                    ProgressView()
+                } else {
+                    Text(chatVM.customChat.kind == .channel ? "Join Channel" : "Join Group")
+                        .font(.body.weight(.semibold))
+                }
+                Spacer()
+            }
+            .padding(12)
+            .contentShape(Rectangle())
+        }
+        .disabled(chatVM.isJoiningChat)
+        .background(.bar)
     }
 
     var scrollToBottomButton: some View {
@@ -345,16 +392,6 @@ struct ChatView: View {
         UIApplication.safeAreaInsets.top + navigationBarHeight
     }
 
-    private var pinnedMessageSummary: String {
-        guard let message = chatVM.currentPinnedMessage else { return "" }
-        return telegramQuotedMessageExcerpt(telegramMessageContentDescription(message))
-    }
-
-    private var detectedChatLanguageName: String {
-        guard let code = chatVM.detectedChatLanguage else { return "" }
-        return Locale.current.localizedString(forLanguageCode: code) ?? code
-    }
-
     private var initialUnreadMessageId: Int64? {
         guard chatVM.initialUnreadCount > 0 else { return nil }
         return chatVM.messages
@@ -387,67 +424,6 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
-    }
-
-    private var chatTranslationBanner: some View {
-        HStack(spacing: 8) {
-            if chatVM.isChatTranslationEnabled {
-                Text("Translated from \(detectedChatLanguageName)")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Show Original") {
-                    chatVM.disableChatTranslation()
-                }
-                .font(.subheadline)
-            } else {
-                Text("Translate from \(detectedChatLanguageName)?")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Dismiss", systemImage: "xmark") {
-                    chatVM.dismissChatTranslationSuggestion()
-                }
-                .labelStyle(.iconOnly)
-                Button("Translate") {
-                    chatVM.enableChatTranslation()
-                }
-                .font(.subheadline.weight(.semibold))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
-    }
-
-    private var pinnedMessageBanner: some View {
-        HStack(spacing: 8) {
-            Button {
-                guard let message = chatVM.currentPinnedMessage else { return }
-                chatVM.navigateToMessage(id: message.id)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Pinned Message")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tint)
-                    Text(pinnedMessageSummary)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
-            Button("Show All Pinned Messages", systemImage: "chevron.right") {
-                showsPinnedMessages = true
-            }
-            .labelStyle(.iconOnly)
-            .frame(width: 44, height: 44)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
         .background(.bar)
     }
 
@@ -488,7 +464,7 @@ struct ChatView: View {
             showsChatInfo = true
         } label: {
             VStack(spacing: 0) {
-                Text(chatVM.customChat.displayTitle)
+                Text(titleOverride ?? chatVM.customChat.displayTitle)
 
                 Group {
                     if !chatVM.actionStatus.isEmpty {
@@ -513,8 +489,21 @@ struct ChatView: View {
             .glassEffect(.regular.interactive())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
+        // `.combine` re-derives this element from its children, and the animated status Text
+        // above is inserted/removed (not just updated) whenever actionStatus/onlineStatus
+        // changes - a structural accessibility-tree change VoiceOver treats as noteworthy enough
+        // to move focus here, stealing it away from wherever the user actually was (e.g. mid-way
+        // through "Show All Pinned Messages"). An explicit, always-present label sidesteps that:
+        // the same element just gets a new string, which VoiceOver applies silently in place.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(principalAccessibilityLabel)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private var principalAccessibilityLabel: String {
+        let title = titleOverride ?? chatVM.customChat.displayTitle
+        let status = chatVM.actionStatus.isEmpty ? chatVM.onlineStatus : chatVM.actionStatus
+        return status.isEmpty ? title : "\(title), \(status)"
     }
 
     private func positionInitialMessagesIfNeeded() {

@@ -42,6 +42,7 @@ struct MacMessageTable: View {
                         albumMessages: albumMessageIds?.compactMap { model.messages.messages[$0] } ?? [],
                         lastReadOutboxMessageId: chat.lastReadOutboxMessageId,
                         showsSenderName: chat.kind == .group,
+                        isChannelMessage: chat.kind == .channel,
                     )
                     .tag(row.id)
                     .padding(.horizontal, 8)
@@ -62,6 +63,8 @@ struct MacMessageTable: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .telegramChatWallpaper()
+        .telegramMessageTextSize()
         .scrollPosition($scrollPosition)
         .accessibilityLabel("Messages")
         .onScrollGeometryChange(for: Bool.self) { geometry in

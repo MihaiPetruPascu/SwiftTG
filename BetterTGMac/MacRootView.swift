@@ -12,6 +12,78 @@ struct MacRootView: View {
     @Bindable var model: MacSessionModel
 
     var body: some View {
+        content
+            // Applies everywhere in the subtree - link clicks in message text, chat bios, link
+            // previews, etc. - so `t.me`/`telegram.me`/`tg:` links resolve in-app instead of
+            // always opening the default browser. Anything else keeps the system's own handling.
+                .environment(\.openURL, OpenURLAction { url in
+                    guard TelegramDeepLink.isTelegramLink(url) else { return .systemAction }
+                    model.handleDeepLink(url)
+                    return .handled
+                })
+                .alert(
+                    "Join Chat?",
+                    isPresented: Binding(
+                        get: { model.pendingDeepLinkJoin != nil },
+                        set: { isPresented in
+                            if !isPresented {
+                                model.pendingDeepLinkJoin = nil
+                            }
+                        },
+                    ),
+                    presenting: model.pendingDeepLinkJoin,
+                ) { _ in
+                    Button("Join") { model.confirmPendingDeepLinkJoin() }
+                    Button("Cancel", role: .cancel) { model.pendingDeepLinkJoin = nil }
+                } message: { pending in
+                    Text(
+                        "\(pending.info.title) · \(pending.info.memberCount) member\(pending.info.memberCount == 1 ? "" : "s")",
+                    )
+                }
+                .alert(
+                    "Link Error",
+                    isPresented: Binding(
+                        get: { model.deepLinkErrorMessage != nil },
+                        set: { isPresented in
+                            if !isPresented {
+                                model.deepLinkErrorMessage = nil
+                            }
+                        },
+                    ),
+                ) {
+                    Button("OK") {}
+                } message: {
+                    Text(model.deepLinkErrorMessage ?? "")
+                }
+                .alert(
+                    "Couldn't Complete Request",
+                    isPresented: Binding(
+                        get: { model.unconfirmedSessionActionError != nil },
+                        set: { isPresented in
+                            if !isPresented {
+                                model.unconfirmedSessionActionError = nil
+                            }
+                        },
+                    ),
+                ) {
+                    Button("OK") {}
+                } message: {
+                    Text(model.unconfirmedSessionActionError ?? "")
+                }
+                .alert("Login Denied", isPresented: $model.showsDeniedSessionNotice) {
+                    Button("OK") {}
+                } message: {
+                    Text("The session was terminated. If this wasn't you, consider changing your password in Two-Step Verification.")
+                }
+    }
+
+    // MARK: Private
+
+    #if DEBUG
+    @State private var showsLoginPreview = false
+    #endif
+
+    @ViewBuilder private var content: some View {
         if model.sessionEnded {
             MacSessionEndedView(canReauthenticate: model.canReauthenticate) {
                 model.reauthenticate()
@@ -20,6 +92,27 @@ struct MacRootView: View {
             MacChatWorkspace(model: model)
                 .task {
                     await TelegramKeepMediaPolicy.applyStoredPolicy(service: model.service)
+                }
+                .overlay(alignment: .top) {
+                    if let unconfirmedSession = model.unconfirmedSession,
+                       MacSessionModel.deviceSessionId(unconfirmedSession) != nil
+                    {
+                        TelegramUnconfirmedSessionBannerView(
+                            session: unconfirmedSession,
+                            isProcessing: model.isProcessingUnconfirmedSession,
+                            onConfirm: { model.confirmUnconfirmedSession() },
+                            onDeny: { model.denyUnconfirmedSession() },
+                        )
+                        .frame(maxWidth: 420)
+                    }
+                }
+                .animation(.default, value: model.unconfirmedSession)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        TelegramNewChatMenu(service: model.service) { chat in
+                            model.activateChat(chat.id)
+                        }
+                    }
                 }
                 #if DEBUG
                 .toolbar {
@@ -37,12 +130,6 @@ struct MacRootView: View {
             MacAuthorizationView(model: model)
         }
     }
-
-    // MARK: Private
-
-    #if DEBUG
-    @State private var showsLoginPreview = false
-    #endif
 }
 
 // MARK: - MacAuthorizationView

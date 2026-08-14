@@ -42,12 +42,10 @@ extension ChatVM {
             let limit = loadsAroundInitialMessage ? 31 : (remainingInitialMessages ?? 30)
             let offset = loadsAroundInitialMessage ? -15 : 0
 
-            guard let history = try? await service.getChatHistory(
-                chatId: customChat.chat.id,
+            guard let history = try? await fetchHistoryPage(
                 fromMessageId: nextFromMessageId,
                 limit: limit,
                 offset: offset,
-                onlyLocal: false,
             ), let page = history.messages else {
                 break
             }
@@ -82,6 +80,59 @@ extension ChatVM {
         await main {
             guard self.loadingMessagesGeneration == generation else { return }
             self.loadingMessagesTask = nil
+        }
+    }
+
+    /// Dispatches to whichever TDLib history call matches `messageTopic` - `getChatHistory` for
+    /// ordinary chats, `getMessageThreadHistory` for comment threads, `getForumTopicHistory` for
+    /// forum topics. All three return `Messages`, so callers need no further branching.
+    func fetchHistoryPage(fromMessageId: Int64, limit: Int, offset: Int) async throws -> Messages {
+        switch messageTopic {
+        case .messageTopicThread(let thread):
+            try await service.getMessageThreadHistory(
+                chatId: customChat.chat.id,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                messageId: thread.messageThreadId,
+                offset: offset,
+            )
+        case .messageTopicForum(let forum):
+            try await service.getForumTopicHistory(
+                chatId: customChat.chat.id,
+                forumTopicId: forum.forumTopicId,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset,
+            )
+        case .messageTopicDirectMessages, .messageTopicSavedMessages, nil:
+            try await service.getChatHistory(
+                chatId: customChat.chat.id,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset,
+                onlyLocal: false,
+            )
+        }
+    }
+
+    /// TDLib excludes a comment thread's own starting message (the channel post's copy in the
+    /// discussion group) from `getMessageThreadHistory` - `MessagesManager` only adds a message to
+    /// the thread's local history if its thread id differs from its own id, so the root is always
+    /// missing from that call and has to be fetched separately, matching Telegram-iOS/Unigram
+    /// (both fetch it via a dedicated discussion-message lookup and splice it into the top of the
+    /// scrollback themselves).
+    func loadThreadRootMessageIfNeeded() {
+        guard case .messageTopicThread(let thread) = messageTopic else { return }
+        let chatId = customChat.chat.id
+        Task.background {
+            guard let rootMessage = try? await self.service.getMessage(
+                chatId: chatId,
+                messageId: thread.messageThreadId,
+            ) else { return }
+            self.service.mergeMessageHistory(chatId: chatId, messages: [rootMessage])
+            await main {
+                self.loadedMessageIds.insert(rootMessage.id)
+            }
         }
     }
 

@@ -96,6 +96,7 @@ enum TDLibFixtures {
         text: String = "Message",
         editDate: Int = 0,
         isOutgoing: Bool = false,
+        canBeSaved: Bool = true,
         sendingState: MessageSendingState? = nil,
         linkPreview: LinkPreview? = nil,
         mediaAlbumId: TdInt64 = 0,
@@ -104,7 +105,7 @@ enum TDLibFixtures {
         Message(
             authorSignature: "",
             autoDeleteIn: 0,
-            canBeSaved: true,
+            canBeSaved: canBeSaved,
             chatId: chatId,
             containsUnreadMention: false,
             containsUnreadPollVotes: false,
@@ -152,6 +153,27 @@ enum TDLibFixtures {
         )
     }
 
+    static func permissions(canSendOtherMessages: Bool) -> ChatPermissions {
+        ChatPermissions(
+            canAddLinkPreviews: true,
+            canChangeInfo: false,
+            canCreateTopics: false,
+            canEditTag: false,
+            canInviteUsers: false,
+            canPinMessages: false,
+            canReactToMessages: true,
+            canSendAudios: true,
+            canSendBasicMessages: true,
+            canSendDocuments: true,
+            canSendOtherMessages: canSendOtherMessages,
+            canSendPhotos: true,
+            canSendPolls: true,
+            canSendVideoNotes: true,
+            canSendVideos: true,
+            canSendVoiceNotes: true,
+        )
+    }
+
     static func position(order: Int64, list: ChatList = .chatListMain) -> ChatPosition {
         ChatPosition(isPinned: false, list: list, order: TdInt64(order), source: nil)
     }
@@ -177,22 +199,5 @@ enum TDLibFixtures {
         useDefaultStorySound: true,
     )
 
-    private static let permissions = ChatPermissions(
-        canAddLinkPreviews: true,
-        canChangeInfo: false,
-        canCreateTopics: false,
-        canEditTag: false,
-        canInviteUsers: false,
-        canPinMessages: false,
-        canReactToMessages: true,
-        canSendAudios: true,
-        canSendBasicMessages: true,
-        canSendDocuments: true,
-        canSendOtherMessages: true,
-        canSendPhotos: true,
-        canSendPolls: true,
-        canSendVideoNotes: true,
-        canSendVideos: true,
-        canSendVoiceNotes: true,
-    )
+    private static let permissions = permissions(canSendOtherMessages: true)
 }

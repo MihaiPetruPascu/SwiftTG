@@ -37,6 +37,18 @@ final class TelegramSession: @unchecked Sendable {
         updateStore.chatListPublisher
     }
 
+    var chatFoldersPublisher: AnyPublisher<UpdateChatFolders?, Never> {
+        updateStore.chatFoldersPublisher
+    }
+
+    var unreadChatCountPublisher: AnyPublisher<UpdateUnreadChatCount?, Never> {
+        updateStore.unreadChatCountPublisher
+    }
+
+    var availableMessageEffectsPublisher: AnyPublisher<UpdateAvailableMessageEffects?, Never> {
+        updateStore.availableMessageEffectsPublisher
+    }
+
     var updatePublisher: AnyPublisher<Update, Never> {
         updateStore.updatePublisher
     }
@@ -182,6 +194,14 @@ final class TelegramSession: @unchecked Sendable {
                     useMessageDatabase: true,
                     useSecretChats: true,
                     useTestDc: false,
+                )
+                // TDLib's notification manager defaults `notification_group_count_max` to 0
+                // (`NotificationManager::DEFAULT_GROUP_COUNT_MAX`), which disables it outright -
+                // it never emits `updateNotificationGroup` at all until told otherwise. 25 matches
+                // Unigram's own TDLib client setup (another TDLib-based client, checked directly).
+                _ = try? await client.setOption(
+                    name: "notification_group_count_max",
+                    value: .optionValueInteger(.init(value: 25)),
                 )
             } catch {
                 self?.resetConfigurationAttempt()

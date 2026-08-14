@@ -21,11 +21,18 @@ struct MainView: View {
                         .navigationDestination(for: Route.self) { route in
                             switch route {
                             case .customChat(let customChat, let messageId, let movesAccessibilityFocus):
-                                ChatView(
-                                    customChat: customChat,
-                                    initialMessageId: messageId,
-                                    movesAccessibilityFocusToInitialMessage: movesAccessibilityFocus,
-                                )
+                                // A forum-enabled supergroup shows its topic list first, matching
+                                // Telegram-iOS - a link to a specific message still opens straight
+                                // into the flat message stream it lives in.
+                                if customChat.supergroup?.isForum == true, messageId == nil {
+                                    ForumTopicsListView(customChat: customChat, service: rootVM.service)
+                                } else {
+                                    ChatView(
+                                        customChat: customChat,
+                                        initialMessageId: messageId,
+                                        movesAccessibilityFocusToInitialMessage: movesAccessibilityFocus,
+                                    )
+                                }
                             case .archive(let customFolder):
                                 FolderView(folder: customFolder)
                                     .navigationTitle(customFolder.name)
@@ -89,7 +96,7 @@ private struct MainNavigationRootView: View {
         .animation(.default, value: rootVM.currentFolder)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle("SwiftTG")
+        .navigationTitle("Chats")
         .searchable(
             text: $rootVM.query,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -153,12 +160,12 @@ private struct MainNavigationRootView: View {
             Text("You will leave this chat and it will be removed from your chat list.")
         }
         .toolbar {
-            if let archive = rootVM.archive {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Archive", systemImage: "archivebox") {
-                        rootVM.navigate(to: .archive(archive))
+            ToolbarItem(placement: .topBarTrailing) {
+                TelegramNewChatMenu(service: rootVM.service) { chat in
+                    Task {
+                        guard let customChat = await rootVM.getCustomChat(from: chat.id) else { return }
+                        rootVM.navigate(to: .customChat(customChat, messageId: nil))
                     }
-                    .labelStyle(.iconOnly)
                 }
             }
             #if DEBUG

@@ -93,10 +93,18 @@ struct ChatListLoadKey: Hashable, Sendable {
     var currentFolder: Int?
     var query = ""
     var searchChatResults = [CustomChat]()
+    var searchGlobalChatResults = [CustomChat]()
     var searchMessageResults = [Message]()
     var searchMessageChatTitles = [Int64: String]()
     var searchResultChatsById = [Int64: CustomChat]()
     var isSearching = false
+    var deepLinkErrorMessage: String?
+    var pendingDeepLinkJoin: TelegramPendingDeepLinkJoin?
+    var inAppNotificationBanner: TelegramInAppNotificationBanner?
+    var unconfirmedSession: UnconfirmedSession?
+    var unconfirmedSessionActionError: String?
+    var showsDeniedSessionNotice = false
+    var isProcessingUnconfirmedSession = false
     @ObservationIgnored var cancellables = Set<AnyCancellable>()
     @ObservationIgnored let service: any TelegramService
     @ObservationIgnored var appliedChatListVersion: UInt64?
@@ -112,6 +120,17 @@ struct ChatListLoadKey: Hashable, Sendable {
     @ObservationIgnored var notificationOpenGeneration: UInt64 = 0
     @ObservationIgnored var shareChatCacheWriteTask: Task<Void, Never>?
     @ObservationIgnored var shareRequestProcessingTask: Task<Void, Never>?
+    @ObservationIgnored var pendingInAppNotificationBanners = [TelegramInAppNotificationBanner]()
+    @ObservationIgnored var inAppNotificationDismissTask: Task<Void, Never>?
+
+    /// The chat currently pushed on screen, if any - `path` is the single shared `NavigationStack`
+    /// path every chat opens through (including from the Contacts tab; see `MainView`'s `onChange`
+    /// that switches to the Chats tab whenever `path` becomes non-empty), so its last route is a
+    /// reliable "what's on screen right now" signal.
+    var currentlyOpenChatId: Int64? {
+        guard case .customChat(let chat, _, _) = path.last else { return nil }
+        return chat.id
+    }
     
     var loggedIn: Bool {
         get {

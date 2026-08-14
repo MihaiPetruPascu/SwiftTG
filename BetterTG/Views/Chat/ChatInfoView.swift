@@ -214,7 +214,7 @@ struct ChatInfoView: View {
         !chatVM.actionStatus.isEmpty ? chatVM.actionStatus : chatVM.onlineStatus
     }
 
-    private func identitySection(_ info: TelegramChatInfoData?) -> some View {
+    private func identitySection(_: TelegramChatInfoData?) -> some View {
         Section {
             VStack(spacing: 12) {
                 VStack(spacing: 12) {
@@ -768,7 +768,6 @@ struct ChatInfoView: View {
             info = nil
         }
     }
-
 }
 
 private struct PrivateCallView: View {

@@ -34,7 +34,9 @@ func telegramMessageFormattedText(_ message: Message) -> FormattedText? {
     case .messagePhoto(let content): content.caption.text.isEmpty ? nil : content.caption
     case .messageText(let content): content.text.text.isEmpty ? nil : content.text
     case .messageVideo(let content): content.caption.text.isEmpty ? nil : content.caption
+    case .messageVideoNote: nil
     case .messageVoiceNote(let content): content.caption.text.isEmpty ? nil : content.caption
+    case .messageAnimation(let content): content.caption.text.isEmpty ? nil : content.caption
     default: nil
     }
 }
@@ -53,10 +55,18 @@ func telegramMessageContentDescription(_ content: MessageContent) -> String {
         content.caption.text.isEmpty ? "Photo" : "Photo: \(content.caption.text)"
     case .messageVoiceNote(let content):
         content.caption.text.isEmpty ? "Voice message" : "Voice message: \(content.caption.text)"
+    case .messageExpiredVoiceNote:
+        "Voice message expired"
     case .messageAudio(let content):
         telegramAudioDescription(content)
     case .messageVideo(let content):
         content.caption.text.isEmpty ? "Video" : "Video: \(content.caption.text)"
+    case .messageVideoNote:
+        "Video message"
+    case .messageExpiredVideoNote:
+        "Video message expired"
+    case .messageAnimation(let content):
+        content.caption.text.isEmpty ? "GIF" : "GIF: \(content.caption.text)"
     case .messageDocument(let content):
         content.caption.text.isEmpty
             ? "File: \(content.document.fileName)"
@@ -202,7 +212,7 @@ func telegramClockDuration(_ seconds: Int) -> String {
     String(format: "%d:%02d", max(0, seconds) / 60, max(0, seconds) % 60)
 }
 
-private func telegramSpokenDuration(_ seconds: Int) -> String {
+func telegramSpokenDuration(_ seconds: Int) -> String {
     let value = max(0, seconds)
     let minutes = value / 60
     let remainingSeconds = value % 60

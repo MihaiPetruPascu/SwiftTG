@@ -43,6 +43,9 @@ extension MessageView {
 
     /// SwiftUI announces actions in reverse declaration order, so declare them from last to first.
     @ViewBuilder var messageAccessibilityActions: some View {
+        if chatVM.customChat.kind == .channel, let replyInfo = customMessage.message.interactionInfo?.replyInfo {
+            Button(replyInfo.replyCount > 0 ? "View Comments" : "Add Comment") { openComments() }
+        }
         if customMessage.properties.canBeDeletedOnlyForSelf
             || customMessage.properties.canBeDeletedForAllUsers
         {
@@ -65,6 +68,20 @@ extension MessageView {
         if customMessage.messageDocument != nil {
             Button("Save to Files", action: saveDocument)
         }
+        if savableGifFileID != nil {
+            Button("Save to GIFs", action: saveGif)
+                .disabled(isSavingGif)
+        }
+        if stickerPackReference != nil {
+            Button("View Sticker Pack", action: openStickerPack)
+        }
+        if let favoriteStickerAction {
+            Button(favoriteStickerAction.title, action: toggleStickerFavorite)
+                .disabled(isMutatingStickerFavorite)
+        }
+        if editableSticker != nil {
+            Button("Edit Sticker", action: openStickerEditor)
+        }
         if !reactionChoices.isEmpty {
             Button("React") { showReactionOptions = true }
         }
@@ -77,6 +94,13 @@ extension MessageView {
     }
 
     @ViewBuilder var messageContextMenu: some View {
+        if chatVM.customChat.kind == .channel, let replyInfo = customMessage.message.interactionInfo?.replyInfo {
+            Button {
+                openComments()
+            } label: {
+                Label(replyInfo.replyCount > 0 ? "View Comments" : "Add Comment", systemImage: "bubble.left")
+            }
+        }
         if customMessage.properties.canBeReplied {
             Button(action: reply) {
                 Label("Reply", systemImage: "arrowshape.turn.up.left")
@@ -103,6 +127,22 @@ extension MessageView {
                 Label("React", systemImage: "face.smiling")
             }
         }
+        if stickerPackReference != nil {
+            Button(action: openStickerPack) {
+                Label("View Sticker Pack", systemImage: "square.stack.3d.up")
+            }
+        }
+        if let favoriteStickerAction {
+            Button(action: toggleStickerFavorite) {
+                Label(favoriteStickerAction.title, systemImage: favoriteStickerAction.systemImage)
+            }
+            .disabled(isMutatingStickerFavorite)
+        }
+        if editableSticker != nil {
+            Button(action: openStickerEditor) {
+                Label("Edit Sticker", systemImage: "pencil.and.outline")
+            }
+        }
         if customMessage.properties.canBeCopied,
            telegramMessageFormattedText(customMessage.message) != nil
         {
@@ -124,6 +164,12 @@ extension MessageView {
                 Label("Save to Files", systemImage: "folder")
             }
             .disabled(isSavingDocument)
+        }
+        if savableGifFileID != nil {
+            Button(action: saveGif) {
+                Label("Save to GIFs", systemImage: "photo.on.rectangle.angled")
+            }
+            .disabled(isSavingGif)
         }
         if customMessage.messageContact != nil {
             Button(action: activateContact) {
@@ -168,6 +214,32 @@ extension MessageView {
         customMessage.canBeTranslated
     }
 
+    var stickerPackReference: TelegramStickerPackReference? {
+        guard let messageSticker = customMessage.messageSticker else { return nil }
+        return TelegramStickerPackReference(messageSticker: messageSticker)
+    }
+
+    var editableSticker: Sticker? {
+        guard let sticker = customMessage.messageSticker?.sticker,
+              TelegramStickerPresentation(sticker).isEditable
+        else { return nil }
+        return sticker
+    }
+
+    var favoriteStickerAction: TelegramStickerFavoriteAction? {
+        guard let sticker = customMessage.messageSticker?.sticker else { return nil }
+        return chatVM.favoriteStickers.action(for: sticker)
+    }
+
+    var isMutatingStickerFavorite: Bool {
+        guard let fileId = customMessage.messageSticker?.sticker.sticker.id else { return false }
+        return chatVM.favoriteStickers.mutatingFileIds.contains(fileId)
+    }
+
+    var savableGifFileID: Int? {
+        TelegramMessageGifSaving.fileID(from: customMessage.message)
+    }
+
     var contactActionTitle: String {
         guard let messageContact = customMessage.messageContact else { return "" }
         return TelegramContactPresentation(messageContact).hasTelegramAccount ? "Message" : "Add to Contacts"
@@ -178,6 +250,65 @@ extension MessageView {
         return TelegramContactPresentation(messageContact).hasTelegramAccount
             ? "message"
             : "person.crop.circle.badge.plus"
+    }
+
+    func openStickerPack() {
+        selectedStickerPack = stickerPackReference
+    }
+
+    func openStickerEditor() {
+        stickerToEdit = editableSticker
+    }
+
+    func toggleStickerFavorite() {
+        guard let sticker = customMessage.messageSticker?.sticker,
+              favoriteStickerAction != nil
+        else { return }
+        chatVM.messageActionError = nil
+        Task { @MainActor in
+            do {
+                try await chatVM.favoriteStickers.toggle(sticker)
+            } catch is CancellationError {
+                return
+            } catch {
+                chatVM.messageActionError = "Favorites couldn't be updated: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    func saveGif() {
+        guard let fileID = savableGifFileID, !isSavingGif else { return }
+        isSavingGif = true
+        chatVM.messageActionError = nil
+        Task { @MainActor in
+            defer { isSavingGif = false }
+            do {
+                try await TelegramMessageGifSaving.save(fileID: fileID, service: chatVM.service)
+            } catch is CancellationError {
+                return
+            } catch {
+                chatVM.messageActionError = "GIF couldn't be saved: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    @MainActor func sendPendingStickerFromPack() async {
+        guard let sticker = pendingStickerFromPack else { return }
+        defer { pendingStickerFromPack = nil }
+        chatVM.messageActionError = nil
+        do {
+            try await TelegramStickerSending.send(
+                sticker,
+                service: chatVM.service,
+                chatId: customMessage.message.chatId,
+                replyToMessageId: nil,
+                topicId: chatVM.messageTopic,
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            chatVM.messageActionError = "Sticker couldn't be sent: \(telegramErrorDescription(error))"
+        }
     }
 
     func toggleTranslation() {
@@ -281,6 +412,50 @@ extension MessageView {
             } catch {
                 guard !Task.isCancelled else { return }
                 chatVM.messageActionError = "File couldn't be saved: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    var commentsErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { commentsErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    commentsErrorMessage = nil
+                }
+            },
+        )
+    }
+
+    /// Resolves the comment thread's discussion group/`messageThreadId` before presenting
+    /// anything - `resolvedComments` only gets set (triggering the sheet) once that's done, so
+    /// there's no empty screen that fills in after the fact, matching Telegram-iOS's own
+    /// preload-then-navigate flow.
+    func openComments() {
+        guard !isLoadingComments else { return }
+        isLoadingComments = true
+        commentsErrorMessage = nil
+
+        Task { @MainActor in
+            defer { isLoadingComments = false }
+            do {
+                let thread = try await chatVM.service.getMessageThread(
+                    chatId: customMessage.message.chatId,
+                    messageId: customMessage.id,
+                )
+                guard let discussionChat = await RootVM.shared.getCustomChat(from: thread.chatId) else {
+                    commentsErrorMessage = "Couldn't load this discussion."
+                    return
+                }
+                resolvedComments = TelegramResolvedCommentsThread(
+                    discussionChat: discussionChat,
+                    messageThreadId: thread.messageThreadId,
+                    channelTitle: chatVM.customChat.displayTitle,
+                    replyCount: customMessage.message.interactionInfo?.replyInfo?.replyCount ?? 0,
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                commentsErrorMessage = telegramErrorDescription(error)
             }
         }
     }

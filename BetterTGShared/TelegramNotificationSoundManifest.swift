@@ -24,6 +24,10 @@ enum TelegramNotificationSoundManifest {
     /// see `soundFileURL(forScopeKey:)` callers, which try the chat key first.
     typealias Contents = [String: Int64]
 
+    static var soundsDirectoryURL: URL? {
+        storageBaseURL?.appending(path: soundsDirectoryName, directoryHint: .isDirectory)
+    }
+
     /// TDLib's own chat id encoding, reconstructed here (not asked of TDLib - the Notification
     /// Service Extension has no TDLib access) so a chat-level override can be looked up from a raw
     /// push payload's separate `from_id`/`basic_group_id`/`channel_id` fields: private chat ids are
@@ -32,10 +36,6 @@ enum TelegramNotificationSoundManifest {
     /// TDLib, not something Telegram is expected to change.
     static func chatKey(for chatId: Int64) -> String {
         "chat:\(chatId)"
-    }
-
-    static var soundsDirectoryURL: URL? {
-        storageBaseURL?.appending(path: soundsDirectoryName, directoryHint: .isDirectory)
     }
 
     /// The `-v3` bumps past files cached by earlier (broken) transcoder versions: v1 wrote
@@ -69,23 +69,17 @@ enum TelegramNotificationSoundManifest {
         try? data.write(to: url, options: .atomic)
     }
 
-    /// Deletes any file in the shared cache no longer referenced by any scope in the manifest -
+    /// Deletes any file in the shared cache, *and* in this calling process's own `Library/Sounds`
+    /// (see `localSoundFileName(copyingFrom:)`), no longer referenced by any scope in the manifest -
     /// call after every manifest change (and once at launch) so switching sounds doesn't leave
     /// orphaned files behind forever. Also sweeps up files left by older, now-unused filename
     /// versions (see the `-v3` comment on `fileName(for:)`), since those never match a current
-    /// entry either.
+    /// entry either. The local half matters most for the Notification Service Extension, which
+    /// has no other maintenance run than "a notification just arrived" to piggyback cleanup on.
     static func pruneOrphanedFiles() {
-        guard let soundsDirectoryURL else { return }
         let referencedFileNames = Set(load().values.map(fileName(for:)))
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: soundsDirectoryURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles],
-        ) else { return }
-
-        for url in entries where !referencedFileNames.contains(url.lastPathComponent) {
-            try? FileManager.default.removeItem(at: url)
-        }
+        pruneOrphanedFiles(in: soundsDirectoryURL, keeping: referencedFileNames)
+        pruneOrphanedFiles(in: localSoundsDirectoryURL, keeping: referencedFileNames)
     }
 
     /// `UNNotificationSound(named:)` only resolves a bare filename against the *calling process's
@@ -94,14 +88,11 @@ enum TelegramNotificationSoundManifest {
     /// to UserNotifications (the Notification Service Extension, or `MacLocalNotifications` on
     /// macOS) must first copy it into its own `Library/Sounds`. Cheap and idempotent - skips the
     /// copy if already there.
-    @discardableResult
-    static func localSoundFileName(copyingFrom sourceURL: URL) -> String? {
-        guard let libraryURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        let localSoundsDir = libraryURL.appending(path: "Sounds", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: localSoundsDir, withIntermediateDirectories: true)
-        let destinationURL = localSoundsDir.appending(path: sourceURL.lastPathComponent, directoryHint: .notDirectory)
+    @discardableResult static func localSoundFileName(copyingFrom sourceURL: URL) -> String? {
+        guard let localSoundsDirectoryURL else { return nil }
+        try? FileManager.default.createDirectory(at: localSoundsDirectoryURL, withIntermediateDirectories: true)
+        let destinationURL = localSoundsDirectoryURL
+            .appending(path: sourceURL.lastPathComponent, directoryHint: .notDirectory)
 
         if !FileManager.default.fileExists(atPath: destinationURL.path) {
             try? FileManager.default.removeItem(at: destinationURL)
@@ -115,16 +106,38 @@ enum TelegramNotificationSoundManifest {
     private static let manifestName = "NotificationSoundManifest.json"
     private static let soundsDirectoryName = "Library/Sounds"
 
+    private static var localSoundsDirectoryURL: URL? {
+        FileManager.default
+            .urls(for: .libraryDirectory, in: .userDomainMask)
+            .first?
+            .appending(path: "Sounds", directoryHint: .isDirectory)
+    }
+
     private static var manifestURL: URL? {
         storageBaseURL?.appending(path: manifestName, directoryHint: .notDirectory)
     }
 
     private static var storageBaseURL: URL? {
         #if os(macOS)
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+        FileManager.default
+.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+.first?
             .appending(path: "BetterTG", directoryHint: .isDirectory)
         #else
         TelegramShareExtension.appGroupContainerURL
         #endif
+    }
+
+    private static func pruneOrphanedFiles(in directoryURL: URL?, keeping referencedFileNames: Set<String>) {
+        guard let directoryURL else { return }
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles],
+        ) else { return }
+
+        for url in entries where !referencedFileNames.contains(url.lastPathComponent) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }

@@ -78,11 +78,21 @@ struct TelegramStorageSettingsView: View {
             }
 
             Section {
-                NavigationLink {
-                    TelegramAutoDownloadSettingsView(service: service)
-                } label: {
-                    Text("Automatic Media Download")
-                }
+                #if os(iOS)
+                    NavigationLink {
+                        TelegramAutoDownloadSettingsView(service: service)
+                    } label: {
+                        Label("Automatic Media Download", systemImage: "arrow.down.circle")
+                    }
+                #else
+                    Button {
+                        presentedDataSetting = .automaticMediaDownload
+                    } label: {
+                        Label("Automatic Media Download", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                #endif
             }
 
             Section("Keep Media") {
@@ -99,17 +109,46 @@ struct TelegramStorageSettingsView: View {
                 .foregroundStyle(.secondary)
             }
 
+            if canIgnoreSensitiveContentRestrictions {
+                Section {
+                    Toggle("Sensitive Content", isOn: sensitiveContentBinding)
+                        .disabled(isSavingSensitiveContent)
+                } footer: {
+                    Text("Show media that's flagged as sensitive without a spoiler overlay.")
+                }
+            }
+
+            Section("Connection Type") {
+                #if os(iOS)
+                    NavigationLink {
+                        TelegramProxySettingsView(service: service)
+                    } label: {
+                        LabeledContent("Proxy", value: proxyStatusStore.shortcutStatus?.value ?? "None")
+                    }
+                #else
+                    Button {
+                        presentedDataSetting = .proxy
+                    } label: {
+                        LabeledContent("Proxy", value: proxyStatusStore.shortcutStatus?.value ?? "None")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                #endif
+            }
+
             if isWorking {
                 Section {
                     ProgressView(workingLabel)
                 }
             }
         }
-        .navigationTitle("Storage Usage")
+        .navigationTitle("Data and Storage")
         .task {
             await TelegramKeepMediaPolicy.applyStoredPolicy(service: service)
             await TelegramAutoDownloadStore.applyStored(service: service)
+            await proxyStatusStore.refresh(service: service)
             await refreshStatistics()
+            await loadSensitiveContentOptions()
         }
         .onChange(of: keepMediaDays) { _, newValue in
             guard let policy = TelegramKeepMediaPolicy(rawValue: newValue) else { return }
@@ -128,9 +167,42 @@ struct TelegramStorageSettingsView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        #if os(macOS)
+        .sheet(item: $presentedDataSetting) { item in
+            NavigationStack {
+                dataSettingDestination(item)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { presentedDataSetting = nil }
+                        }
+                    }
+            }
+            .frame(minWidth: 440, minHeight: 420)
+        }
+        #endif
     }
 
     // MARK: Private
+
+    #if os(macOS)
+    private enum DataSetting: String, Identifiable {
+        case automaticMediaDownload
+        case proxy
+
+        // MARK: Internal
+
+        var id: Self { self }
+    }
+
+    @ViewBuilder private func dataSettingDestination(_ item: DataSetting) -> some View {
+        switch item {
+        case .automaticMediaDownload:
+            TelegramAutoDownloadSettingsView(service: service)
+        case .proxy:
+            TelegramProxySettingsView(service: service)
+        }
+    }
+    #endif
 
     private static let clearableFileTypes: [FileType] = [
         .fileTypeAnimation,
@@ -163,12 +235,19 @@ struct TelegramStorageSettingsView: View {
         .rawValue
     @State private var cachedFileCount = 0
     @State private var cachedFilesSize: Int64 = 0
+    @State private var canIgnoreSensitiveContentRestrictions = false
     @State private var confirmsCacheClear = false
     @State private var errorMessage: String?
+    @State private var ignoresSensitiveContentRestrictions = false
+    @State private var isSavingSensitiveContent = false
     @State private var isWorking = false
     @State private var workingLabel = "Calculating storage usage…"
+    #if os(macOS)
+    @State private var presentedDataSetting: DataSetting?
+    #endif
 
     private let service: any TelegramService
+    private let proxyStatusStore = TelegramProxyStatusStore.shared
 
     private var errorIsPresented: Binding<Bool> {
         Binding(
@@ -183,6 +262,40 @@ struct TelegramStorageSettingsView: View {
 
     private var formattedCacheSize: String {
         ByteCountFormatter.string(fromByteCount: cachedFilesSize, countStyle: .file)
+    }
+
+    private var sensitiveContentBinding: Binding<Bool> {
+        Binding(
+            get: { ignoresSensitiveContentRestrictions },
+            set: { newValue in
+                let previousValue = ignoresSensitiveContentRestrictions
+                ignoresSensitiveContentRestrictions = newValue
+                isSavingSensitiveContent = true
+                Task {
+                    defer { isSavingSensitiveContent = false }
+                    do {
+                        _ = try await service.setOption(
+                            name: "ignore_sensitive_content_restrictions",
+                            value: .optionValueBoolean(OptionValueBoolean(value: newValue)),
+                        )
+                    } catch {
+                        ignoresSensitiveContentRestrictions = previousValue
+                        errorMessage = telegramErrorDescription(error)
+                    }
+                }
+            },
+        )
+    }
+
+    @MainActor private func loadSensitiveContentOptions() async {
+        guard case .optionValueBoolean(let canIgnore) = try? await service.getOption(
+            name: "can_ignore_sensitive_content_restrictions",
+        ) else { return }
+        canIgnoreSensitiveContentRestrictions = canIgnore.value
+        guard canIgnore.value, case .optionValueBoolean(let ignores) = try? await service.getOption(
+            name: "ignore_sensitive_content_restrictions",
+        ) else { return }
+        ignoresSensitiveContentRestrictions = ignores.value
     }
 
     @MainActor private func apply(_ policy: TelegramKeepMediaPolicy) async {

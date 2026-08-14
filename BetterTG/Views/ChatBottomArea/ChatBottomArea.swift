@@ -20,20 +20,17 @@ struct ChatBottomArea: View {
     /// Thresholds mirror Telegram's own recording button: drag left to cancel,
     /// drag up to lock into hands-free recording.
     ///
-    /// Recording only starts once the press has been held past `minimumDuration` - a plain tap
-    /// (release before that) does nothing, rather than starting and instantly stopping a
-    /// near-zero-length recording. There's no video-message mode to switch to on a quick tap
-    /// (round-video recording isn't implemented), so a tap is simply a no-op for now.
-    var voiceRecordingGesture: some Gesture {
+    /// A quick tap switches between voice and video, while holding records the selected kind.
+    var recordingGesture: some Gesture {
         LongPressGesture(minimumDuration: 0.2)
             .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
                 guard case .second(true, let drag) = value, !chatVM.recordingLocked else { return }
-                if !chatVM.recordingVoiceNote, !hasBegunRecording {
+                if !recordingActive, !hasBegunRecording {
                     hasBegunRecording = true
-                    Task.main { await chatVM.mediaStartRecordingVoice() }
+                    Task.main { await startSelectedRecording() }
                 }
-                guard chatVM.recordingVoiceNote, let drag else { return }
+                guard recordingActive, let drag else { return }
                 chatVM.recordingDragTranslation = drag.translation
                 if drag.translation.height < -110 {
                     withAnimation { chatVM.recordingLocked = true }
@@ -45,7 +42,7 @@ struct ChatBottomArea: View {
             .onEnded { value in
                 defer { hasBegunRecording = false }
                 guard case .second(true, let drag) = value,
-                      chatVM.recordingVoiceNote, !chatVM.recordingLocked
+                      recordingActive || chatVM.preparingVideoNote, !chatVM.recordingLocked
                 else { return }
                 let translation = drag?.translation ?? .zero
                 let predictedTranslation = drag?.predictedEndTranslation ?? .zero
@@ -54,7 +51,7 @@ struct ChatBottomArea: View {
                 } else if translation.height < -60 || predictedTranslation.height < -400 {
                     withAnimation { chatVM.recordingLocked = true }
                 } else {
-                    chatVM.mediaStopRecordingVoice(duration: Int(chatVM.timerCount), wave: chatVM.wave)
+                    sendCurrentRecording()
                 }
             }
     }
@@ -79,6 +76,10 @@ struct ChatBottomArea: View {
             && chatVM.activeLinkPreviewComposer.preview != nil
     }
 
+    var composerInputMode: TelegramComposerInputMode {
+        showsStickersAndGifsPicker ? .media : .text
+    }
+
     var body: some View {
         @Bindable var chatVM = chatVM
         VStack(spacing: 0) {
@@ -88,19 +89,48 @@ struct ChatBottomArea: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            TelegramStickerSuggestionBar(
+                service: chatVM.service,
+                chatId: chatVM.customChat.chat.id,
+                replyToMessageId: chatVM.replyMessage?.id,
+                topicId: chatVM.messageTopic,
+                text: chatVM.text.string,
+                isEnabled: !showsStickersAndGifsPicker
+                    && !recordingActive
+                    && chatVM.editCustomMessage == nil
+                    && chatVM.displayedImages.isEmpty
+                    && chatVM.displayedDocuments.isEmpty,
+                onSendingChanged: { chatVM.isSubmittingMessage = $0 },
+                onSent: {
+                    chatVM.text = ""
+                    chatVM.replyMessage = nil
+                    await chatVM.updateDraft()
+                },
+            ) { sticker in
+                TelegramStickerView(
+                    sticker: sticker,
+                    service: chatVM.service,
+                    maxSide: 64,
+                    playsAnimation: false,
+                )
+            }
+
             HStack(alignment: .bottom, spacing: 6) {
-                if chatVM.recordingVoiceNote {
+                if recordingActive || chatVM.preparingVideoNote || chatVM.finalizingVideoNote {
                     recordingIndicator
                 } else {
                     leftSide
+                        .disabled(!composerInputMode.allowsTextControls)
 
                     textField
+                        .disabled(!composerInputMode.allowsTextControls)
 
-                    Button {
-                        showsStickerPicker = true
-                    } label: {
-                        Label("Stickers", systemImage: "face.smiling")
-                            .labelStyle(.iconOnly)
+                    Button(action: toggleMediaInput) {
+                        Label(
+                            composerInputMode.mediaButtonTitle,
+                            systemImage: composerInputMode.mediaButtonSystemImage,
+                        )
+                        .labelStyle(.iconOnly)
                     }
                     .font(.system(size: 22))
                     .foregroundStyle(.white)
@@ -109,9 +139,30 @@ struct ChatBottomArea: View {
                 }
 
                 rightSide
+                    .disabled(!composerInputMode.allowsTextControls)
+            }
+
+            if showsStickersAndGifsPicker {
+                Divider()
+                    .padding(.top, 8)
+
+                ChatStickersAndGifsPicker(onClose: {
+                    withAnimation {
+                        showsStickersAndGifsPicker = false
+                    }
+                })
+                .containerRelativeFrame(.vertical) { availableHeight, _ in
+                    min(availableHeight * 0.42, 360)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .onDisappear { Task.background { [chatVM] in await chatVM.updateDraft() } }
+        .onDisappear {
+            if chatVM.recordingVideoNote || chatVM.pausedVideoNote || chatVM.preparingVideoNote {
+                chatVM.cancelRecordingVideo()
+            }
+            Task.background { [chatVM] in await chatVM.updateDraft() }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase != .active else { return }
             Task.background { [chatVM] in await chatVM.updateDraft() }
@@ -153,6 +204,7 @@ struct ChatBottomArea: View {
                     service: chatVM.service,
                     chatId: chatVM.customChat.chat.id,
                     replyToMessageId: chatVM.replyMessage?.id,
+                    topicId: chatVM.messageTopic,
                 )
                 chatVM.replyMessage = nil
                 await chatVM.updateDraft()
@@ -165,6 +217,7 @@ struct ChatBottomArea: View {
                     service: chatVM.service,
                     chatId: chatVM.customChat.chat.id,
                     replyToMessageId: chatVM.replyMessage?.id,
+                    topicId: chatVM.messageTopic,
                 )
                 chatVM.replyMessage = nil
                 await chatVM.updateDraft()
@@ -185,6 +238,7 @@ struct ChatBottomArea: View {
                     service: chatVM.service,
                     chatId: chatVM.customChat.chat.id,
                     replyToMessageId: chatVM.replyMessage?.id,
+                    topicId: chatVM.messageTopic,
                 )
                 chatVM.replyMessage = nil
                 await chatVM.updateDraft()
@@ -203,6 +257,7 @@ struct ChatBottomArea: View {
                         service: chatVM.service,
                         chatId: chatVM.customChat.chat.id,
                         replyToMessageId: chatVM.replyMessage?.id,
+                        topicId: chatVM.messageTopic,
                     )
                     chatVM.replyMessage = nil
                     await chatVM.updateDraft()
@@ -212,22 +267,9 @@ struct ChatBottomArea: View {
                 },
             )
         }
-        .sheet(isPresented: $showsStickerPicker) {
-            TelegramStickerPickerView(
-                service: chatVM.service,
-                chatId: chatVM.customChat.chat.id,
-                replyToMessageId: chatVM.replyMessage?.id,
-                onSent: {
-                    chatVM.replyMessage = nil
-                    await chatVM.updateDraft()
-                },
-            ) { sticker in
-                TelegramStickerView(
-                    sticker: sticker,
-                    service: chatVM.service,
-                    maxSide: 76,
-                    playsAnimation: false,
-                )
+        .sheet(isPresented: $showsVideoEffectPicker) {
+            TelegramMessageEffectPicker(service: chatVM.service) { effectId in
+                sendCurrentRecording(effectId: effectId)
             }
         }
         .padding(.horizontal, 8)
@@ -239,19 +281,19 @@ struct ChatBottomArea: View {
                 .fill(.blue)
                 .frame(width: 96, height: 96)
                 .overlay(alignment: .center) {
-                    Image(systemName: "mic.fill")
+                    Image(systemName: recordingMode == .voice ? "mic.fill" : "video.fill")
                         .foregroundStyle(.white)
                         .font(.title2)
                 }
-                .disabled(!chatVM.recordingVoiceNote)
+                .disabled(!recordingActive)
                 .opacity(chatVM.recordingLocked ? 1 : 0)
                 .scaleEffect(chatVM.recordingLocked ? 1 : 0)
                 .offset(x: 20, y: 20)
-                .onTapGesture { chatVM.mediaStopRecordingVoice(duration: Int(chatVM.timerCount), wave: chatVM.wave) }
+                .onTapGesture { sendCurrentRecording() }
                 .accessibilityHidden(true)
         }
         .overlay(alignment: .topTrailing) {
-            if chatVM.recordingVoiceNote, !chatVM.recordingLocked {
+            if recordingActive, !chatVM.recordingLocked {
                 VStack(spacing: 4) {
                     Image(systemName: "lock.fill")
                     Image(systemName: "chevron.up")
@@ -277,6 +319,21 @@ struct ChatBottomArea: View {
         .onChange(of: chatVM.recordingLocked) { _, isLocked in
             guard isLocked else { return }
             UIAccessibility.post(notification: .announcement, argument: "Recording locked")
+        }
+        .alert(
+            "Video Message",
+            isPresented: Binding(
+                get: { chatVM.videoRecorder.errorMessage != nil },
+                set: {
+                    if !$0 {
+                        chatVM.videoRecorder.clearError()
+                    }
+                },
+            ),
+        ) {
+            Button("OK", role: .cancel) { chatVM.videoRecorder.clearError() }
+        } message: {
+            Text(chatVM.videoRecorder.errorMessage ?? "Video recording failed.")
         }
         .onChange(of: chatVM.displayedImages) { nc.post(name: .localScrollToLastIfNeeded) }
         .task(id: chatVM.customChat.chat.id) {
@@ -428,10 +485,13 @@ struct ChatBottomArea: View {
         }
         .onChange(of: focused.wrappedValue) {
             guard focused.wrappedValue else { return }
-            withAnimation { chatVM.showDetail = false }
+            withAnimation {
+                chatVM.showDetail = false
+                showsStickersAndGifsPicker = false
+            }
         }
     }
-    
+
     /// Stays mounted for the whole record gesture (touch-down through lock/cancel/send) —
     /// swapping it out mid-drag would tear down the DragGesture and lose touch tracking.
     var rightSide: some View {
@@ -443,7 +503,7 @@ struct ChatBottomArea: View {
                     .frame(width: 32, height: 32)
                     .padding(.bottom, 3)
             } else {
-                Image(systemName: "mic.fill")
+                Image(systemName: recordingMode == .voice ? "mic.fill" : "video.fill")
                     .foregroundStyle(.white)
                     .padding(.bottom, 5)
             }
@@ -454,14 +514,16 @@ struct ChatBottomArea: View {
         .transition(.scale)
         .modify {
             if chatVM.recordingLocked {
-                $0.onTapGesture { chatVM.mediaStopRecordingVoice(duration: Int(chatVM.timerCount), wave: chatVM.wave) }
+                $0.onTapGesture { sendCurrentRecording() }
             } else if chatVM.showSendButton {
                 $0.onTapGesture {
                     chatVM.sendMessageTask?.cancel()
                     chatVM.sendMessageTask = Task.main { await chatVM.sendMessage() }
                 }
             } else {
-                $0.gesture(voiceRecordingGesture)
+                $0
+                    .gesture(recordingGesture)
+                    .onTapGesture { toggleRecordingMode() }
             }
         }
         .onChange(of: chatVM.editMessageText, chatVM.setShowSendButton)
@@ -471,8 +533,18 @@ struct ChatBottomArea: View {
         .onChange(of: chatVM.editCustomMessage, chatVM.setShowSendButton)
         .disabled(chatVM.isSubmittingMessage)
         .modify {
-            if chatVM.recordingLocked {
+            if chatVM.recordingLocked, !currentRecordingIsViewOnce {
                 $0.contextMenu {
+                    if recordingMode == .video {
+                        Button("Send Silently", systemImage: "bell.slash") {
+                            sendCurrentRecording(disableNotification: true)
+                        }
+                        if chatVM.customChat.user != nil {
+                            Button("Send with Effect…", systemImage: "sparkles") {
+                                showsVideoEffectPicker = true
+                            }
+                        }
+                    }
                     Button("Send Later…", systemImage: "clock") { showsScheduleVoicePicker = true }
                 }
             } else if chatVM.showSendButton, chatVM.editCustomMessage == nil {
@@ -490,42 +562,59 @@ struct ChatBottomArea: View {
             }
         }
         .sheet(isPresented: $showsScheduleVoicePicker) {
-            ScheduleSendView(allowsSendWhenOnline: chatVM.customChat.user != nil) { schedulingState in
-                chatVM.mediaStopRecordingVoice(
-                    duration: Int(chatVM.timerCount),
-                    wave: chatVM.wave,
-                    schedulingState: schedulingState,
-                )
+            ScheduleSendView(
+                allowsSendWhenOnline: chatVM.customChat.user != nil,
+                allowsRepeat: recordingMode == .video,
+            ) { schedulingState in
+                sendCurrentRecording(schedulingState: schedulingState)
             }
         }
         .accessibilityElement()
         .accessibilityLabel(
             chatVM.recordingLocked
-                ? "Send Voice Message"
-                : chatVM.showSendButton ? "Send Message" : "Record Voice Message",
+                ? "Send \(recordingMode.accessibilityName) Message"
+                : chatVM.showSendButton ? "Send Message" : "Record \(recordingMode.accessibilityName) Message",
         )
         .accessibilityAddTraits(.isButton)
         // While recording but not yet locked, this still visually shows the mic glyph as a
         // placeholder, but offering "Record Voice Message" here would be redundant/confusing
         // alongside the recording indicator's Cancel action and the lock circle's Send action.
-        .accessibilityHidden(chatVM.recordingVoiceNote && !chatVM.recordingLocked)
+        .accessibilityHidden(recordingActive && !chatVM.recordingLocked)
         .accessibilityAction {
             if chatVM.recordingLocked {
-                chatVM.mediaStopRecordingVoice(duration: Int(chatVM.timerCount), wave: chatVM.wave)
+                sendCurrentRecording()
             } else if chatVM.showSendButton {
                 chatVM.sendMessageTask?.cancel()
                 chatVM.sendMessageTask = Task.main { await chatVM.sendMessage() }
+            } else {
+                toggleRecordingMode()
             }
-            // Recording itself must only start from a genuine hold, matching the sighted-user
-            // contract exactly (see voiceRecordingGesture) - a plain double-tap here is a no-op,
-            // same as a plain tap for sighted users; VoiceOver's "double-tap and hold" reaches
-            // voiceRecordingGesture directly instead of this shortcut.
         }
         // The context menus above need a long-press VoiceOver users can't reliably perform;
         // this surfaces the same "Send Later" entry points through the rotor's actions instead.
         .modify {
-            if chatVM.recordingLocked {
-                $0.accessibilityAction(named: "Send Later") { showsScheduleVoicePicker = true }
+            if chatVM.recordingLocked, !currentRecordingIsViewOnce {
+                $0
+                    .modify {
+                        if recordingMode == .video {
+                            $0
+                                .accessibilityAction(named: "Send Silently") {
+                                    sendCurrentRecording(disableNotification: true)
+                                }
+                                .modify {
+                                    if chatVM.customChat.user != nil {
+                                        $0.accessibilityAction(named: "Send with Effect") {
+                                            showsVideoEffectPicker = true
+                                        }
+                                    } else {
+                                        $0
+                                    }
+                                }
+                        } else {
+                            $0
+                        }
+                    }
+                    .accessibilityAction(named: "Send Later") { showsScheduleVoicePicker = true }
             } else if chatVM.showSendButton, chatVM.editCustomMessage == nil {
                 $0.accessibilityAction(named: "Send Later") { showsScheduleSendPicker = true }
             } else {
@@ -578,39 +667,149 @@ struct ChatBottomArea: View {
     /// Cancel is always tappable (needed for VoiceOver, which never drives the slide gesture);
     /// the slide-to-cancel hint is an additional affordance for sighted users while unlocked.
     var recordingIndicator: some View {
-        HStack(spacing: 8) {
-            Button {
-                chatVM.cancelRecordingVoice()
-            } label: {
-                Image(systemName: "trash")
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button("Cancel Recording", systemImage: "trash", action: cancelCurrentRecording)
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 20))
                     .foregroundStyle(.white)
-                    .contentShape(.rect)
-            }
-            .accessibilityLabel("Cancel Recording")
 
-            Circle()
-                .fill(.red)
-                .frame(width: 8, height: 8)
-            Text(chatVM.formattedTimerCount)
-                .foregroundStyle(.white)
-                .monospacedDigit()
-
-            Spacer()
-
-            if !chatVM.recordingLocked {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                    Text("Slide to Cancel")
+                if recordingMode == .video, chatVM.videoRecorder.hasPreview {
+                    TelegramVideoNotePlaybackPreview(
+                        sourceURLs: chatVM.videoRecorder.previewSourceURLs,
+                        trimRange: chatVM.videoRecorder.normalizedTrimRange,
+                        isMuted: chatVM.videoRecorder.isMuted,
+                    )
+                    .frame(width: 72, height: 72)
+                    .clipShape(Circle())
+                } else if recordingMode == .video, recordingActive {
+                    TelegramVideoNoteCapturePreview(
+                        session: chatVM.videoRecorder.captureSession,
+                        position: chatVM.videoRecorder.cameraPosition,
+                    )
+                    .frame(width: 72, height: 72)
+                    .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.gray)
-                .offset(x: min(0, chatVM.recordingDragTranslation.width / 3))
-                .opacity(1 - min(1, abs(chatVM.recordingDragTranslation.width) / 150))
-                .accessibilityHidden(true)
+                Text(formattedRecordingDuration)
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+
+                if recordingMode == .video, recordingActive {
+                    if chatVM.videoRecorder.hasPreview {
+                        Button("Record More", systemImage: "record.circle") {
+                            Task { await toggleVideoRecordingPause() }
+                        }
+                        .labelStyle(.iconOnly)
+                        Button(
+                            chatVM.videoRecorder.isMuted ? "Unmute Preview" : "Mute Preview",
+                            systemImage: chatVM.videoRecorder.isMuted ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                        ) {
+                            chatVM.videoRecorder.isMuted.toggle()
+                        }
+                        .labelStyle(.iconOnly)
+                    } else {
+                        Button("Pause Recording", systemImage: "pause.fill") {
+                            Task { await toggleVideoRecordingPause() }
+                        }
+                        .labelStyle(.iconOnly)
+                        videoCameraControls
+                    }
+                }
+
+                if viewOnceRecordingIsAvailable {
+                    Button(
+                        currentRecordingIsViewOnce ? "Send Normally" : "View Once",
+                        systemImage: currentRecordingIsViewOnce ? "1.circle.fill" : "1.circle",
+                    ) {
+                        if recordingMode == .voice {
+                            chatVM.voiceNoteIsViewOnce.toggle()
+                        } else {
+                            chatVM.videoRecorder.isViewOnce.toggle()
+                        }
+                    }
+                    .labelStyle(.iconOnly)
+                }
+
+                Spacer()
+
+                if !chatVM.recordingLocked {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Slide to Cancel")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.gray)
+                    .offset(x: min(0, chatVM.recordingDragTranslation.width / 3))
+                    .opacity(1 - min(1, abs(chatVM.recordingDragTranslation.width) / 150))
+                    .accessibilityHidden(true)
+                }
+            }
+
+            if recordingMode == .video, chatVM.videoRecorder.hasPreview {
+                videoTrimControls
             }
         }
         .padding(.bottom, 6)
+    }
+
+    var videoTrimControls: some View {
+        @Bindable var recorder = chatVM.videoRecorder
+        let duration = max(0, recorder.duration)
+        let minimumDuration = min(TelegramVideoNoteEditing.minimumTrimDuration, duration)
+        return VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Trim Start") {
+                Slider(
+                    value: $recorder.trimStart,
+                    in: 0...max(0, duration - minimumDuration),
+                    step: 0.1,
+                )
+                .accessibilityValue("\(recorder.trimStart.formatted(.number.precision(.fractionLength(1)))) seconds")
+            }
+            LabeledContent("Trim End") {
+                Slider(
+                    value: $recorder.trimEnd,
+                    in: minimumDuration...max(minimumDuration, duration),
+                    step: 0.1,
+                )
+                .accessibilityValue("\(recorder.trimEnd.formatted(.number.precision(.fractionLength(1)))) seconds")
+            }
+        }
+        .onChange(of: recorder.trimStart) { recorder.normalizeTrimValues() }
+        .onChange(of: recorder.trimEnd) { recorder.normalizeTrimValues() }
+    }
+
+    var videoCameraControls: some View {
+        let recorder = chatVM.videoRecorder
+        return Menu("Camera Controls", systemImage: "camera.badge.ellipsis") {
+            if recorder.canSwitchCamera {
+                Button(
+                    recorder.cameraPosition == .front ? "Switch to Back Camera" : "Switch to Front Camera",
+                    systemImage: "camera.rotate",
+                    action: recorder.switchCamera,
+                )
+            }
+            if recorder.canUseFlash {
+                Button(
+                    recorder.isFlashEnabled ? "Turn Off Flash" : "Turn On Flash",
+                    systemImage: recorder.isFlashEnabled ? "bolt.slash.fill" : "bolt.fill",
+                    action: recorder.toggleFlash,
+                )
+            }
+            Divider()
+            Button("Zoom Out", systemImage: "minus.magnifyingglass", action: recorder.zoomOut)
+                .disabled(!recorder.canZoomOut)
+            Button("Zoom In", systemImage: "plus.magnifyingglass", action: recorder.zoomIn)
+                .disabled(!recorder.canZoomIn)
+            Button("Reset Zoom", systemImage: "1.magnifyingglass", action: recorder.resetZoom)
+                .disabled(!recorder.canZoomOut)
+        }
+        .labelStyle(.iconOnly)
+        .disabled(recorder.isChangingCamera)
+        .accessibilityValue("\(recorder.cameraPosition.description), \(recorder.zoomDescription)")
     }
 
     func linkPreviewAccessory(_ preview: LinkPreview) -> some View {
@@ -664,6 +863,16 @@ struct ChatBottomArea: View {
         }
     }
 
+    func toggleMediaInput() {
+        if showsStickersAndGifsPicker {
+            withAnimation { showsStickersAndGifsPicker = false }
+            focused.wrappedValue = true
+        } else {
+            focused.wrappedValue = false
+            withAnimation { showsStickersAndGifsPicker = true }
+        }
+    }
+
     // MARK: Private
 
     @Environment(\.scenePhase) private var scenePhase
@@ -676,13 +885,85 @@ struct ChatBottomArea: View {
     @State private var showsLocationComposer = false
     @State private var showsScheduleSendPicker = false
     @State private var showsScheduleVoicePicker = false
-    @State private var showsStickerPicker = false
+    @State private var showsVideoEffectPicker = false
+    @State private var showsStickersAndGifsPicker = false
     @State private var pollIsAvailable = false
 
     @State private var hasBegunRecording = false
+    @State private var recordingMode = RecordingMode.voice
+
+    private var recordingActive: Bool {
+        chatVM.recordingVoiceNote || chatVM.recordingVideoNote || chatVM.pausedVideoNote
+    }
+
+    private var formattedRecordingDuration: String {
+        let duration = recordingMode == .voice ? chatVM.timerCount : chatVM.videoRecordingDuration
+        return telegramClockDuration(Int(duration))
+    }
+
+    private var currentRecordingIsViewOnce: Bool {
+        recordingMode == .voice ? chatVM.voiceNoteIsViewOnce : chatVM.videoRecorder.isViewOnce
+    }
+
+    private var viewOnceRecordingIsAvailable: Bool {
+        chatVM.customChat.user != nil && !chatVM.customChat.isSavedMessages
+    }
+
+    private func startSelectedRecording() async {
+        if recordingMode == .voice {
+            await chatVM.mediaStartRecordingVoice()
+        } else {
+            await chatVM.mediaStartRecordingVideo()
+        }
+    }
+
+    private func toggleRecordingMode() {
+        recordingMode.toggle()
+    }
+
+    private func cancelCurrentRecording() {
+        if recordingMode == .voice {
+            chatVM.cancelRecordingVoice()
+        } else {
+            chatVM.cancelRecordingVideo()
+        }
+        chatVM.recordingLocked = false
+    }
+
+    private func toggleVideoRecordingPause() async {
+        if chatVM.pausedVideoNote {
+            await chatVM.resumeRecordingVideo()
+        } else {
+            chatVM.recordingLocked = true
+            chatVM.pauseRecordingVideo()
+        }
+    }
+
+    private func sendCurrentRecording(
+        schedulingState: MessageSchedulingState? = nil,
+        disableNotification: Bool = false,
+        effectId: TdInt64 = 0,
+    ) {
+        if recordingMode == .voice {
+            chatVM.mediaStopRecordingVoice(
+                duration: Int(chatVM.timerCount),
+                wave: chatVM.wave,
+                schedulingState: schedulingState,
+            )
+        } else if chatVM.preparingVideoNote {
+            chatVM.cancelRecordingVideo()
+        } else {
+            chatVM.mediaStopRecordingVideo(
+                schedulingState: schedulingState,
+                disableNotification: disableNotification,
+                effectId: effectId,
+            )
+        }
+        chatVM.recordingLocked = false
+    }
 
     private func discardRecordingFromGesture() {
-        chatVM.cancelRecordingVoice()
+        cancelCurrentRecording()
         UIAccessibility.post(notification: .announcement, argument: "Recording discarded")
     }
 
@@ -714,6 +995,7 @@ struct ChatBottomArea: View {
             chatId: chatId,
             contents: [content],
             replyTo: TelegramMessageSending.replyTo(messageId: chatVM.replyMessage?.id),
+            topicId: chatVM.messageTopic,
             onAccepted: { messages in
                 service.mergeMessages(chatId: chatId, messages: messages)
             },
@@ -730,6 +1012,26 @@ struct ChatBottomArea: View {
         )
         chatVM.replyMessage = nil
         await chatVM.updateDraft()
+    }
+}
+
+// MARK: - RecordingMode
+
+private enum RecordingMode {
+    case voice
+    case video
+
+    // MARK: Internal
+
+    var accessibilityName: String {
+        switch self {
+        case .voice: "Voice"
+        case .video: "Video"
+        }
+    }
+
+    mutating func toggle() {
+        self = self == .voice ? .video : .voice
     }
 }
 

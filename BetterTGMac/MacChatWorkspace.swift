@@ -125,6 +125,24 @@ private struct MacChatSidebar: View {
                 }
             }
 
+            if !model.globalChatSearchResults.isEmpty {
+                Section {
+                    ForEach(model.globalChatSearchResults) { result in
+                        MacChatRow(
+                            model: model,
+                            chat: model.chatList.items[result.chatId] ?? result.chat,
+                            chatList: result.chatList,
+                        )
+                        .tag(result.id)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.activateChat(result.chatId) }
+                    }
+                } header: {
+                    Text("Global Search")
+                        .font(.headline)
+                }
+            }
+
             if !model.messageSearchResults.isEmpty {
                 Section {
                     ForEach(model.messageSearchResults) { result in
@@ -173,6 +191,7 @@ private struct MacChatSidebar: View {
         .overlay {
             if !model.isSearching,
                model.chatSearchResults.isEmpty,
+               model.globalChatSearchResults.isEmpty,
                model.messageSearchResults.isEmpty
             {
                 ContentUnavailableView.search(text: model.searchQuery)
@@ -188,8 +207,16 @@ private struct MacChatDetail: View {
 
     var body: some View {
         if let chat = model.openedChat {
-            MacConversationView(model: model, chat: chat)
-                .id(chat.chatId)
+            // A forum-enabled supergroup shows its topic list first, matching Telegram-iOS -
+            // opening a specific topic (or leaving the forum entirely) switches `model.openedTopic`,
+            // which flips this back to `MacConversationView`.
+            if chat.isForum == true, model.openedTopic == nil {
+                MacForumTopicsListView(model: model, chat: chat)
+                    .id(chat.chatId)
+            } else {
+                MacConversationView(model: model, chat: chat)
+                    .id("\(chat.chatId)-\(model.openedTopic?.hashValue ?? 0)")
+            }
         } else {
             ContentUnavailableView(
                 "Select a Chat",

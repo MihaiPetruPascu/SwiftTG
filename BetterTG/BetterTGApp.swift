@@ -37,13 +37,18 @@ import UserNotifications
                 RootView()
                     .telegramAppearance()
                     .appLockOverlay()
-                    // Handles the Share Extension's `swifttg://share?id=<uuid>` hand-off - covers
-                    // both a cold launch (the URL that started the app) and an already-running app,
-                    // unlike the hand-rolled `UIWindowSceneDelegate` this replaced, which turned out
-                    // to never actually get invoked in practice.
-                        .onOpenURL { url in
+                    // Handles both the Share Extension's `swifttg://share?id=<uuid>` hand-off
+                    // (covers both a cold launch and an already-running app, unlike the
+                    // hand-rolled `UIWindowSceneDelegate` this replaced, which turned out to never
+                    // actually get invoked in practice) and any `tg:`/`t.me` deep link the app is
+                    // opened with directly (a share-sheet "Open in SwiftTG", a Shortcut, etc.).
+                    .onOpenURL { url in
+                        if url.scheme == "swifttg" {
                             RootVM.shared.handleShareURL(url)
+                        } else {
+                            RootVM.shared.handleDeepLink(url)
                         }
+                    }
             }
         }
         // Belt-and-suspenders for the share hand-off: `.authorizationStateReady` (RootVM's other
@@ -115,12 +120,19 @@ import UserNotifications
         }
     }
 
+    /// `willPresent` only ever fires while the app is genuinely foregrounded - a backgrounded or
+    /// killed app never reaches this delegate method at all, so the raw system push (pre-rendered
+    /// server-side, since there's no live TDLib connection to consult in that state) still shows
+    /// exactly as before. While foregrounded, TDLib *is* alive and already knows which chat is open
+    /// and what's actually still unread - `RootVM.handleNotificationGroupUpdate` uses that to decide
+    /// whether to show the app's own in-app banner instead, mirroring how Telegram-iOS's own
+    /// `willPresent` never calls its completion handler for the active account either.
     nonisolated func userNotificationCenter(
         _: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
     ) {
-        completionHandler([.banner, .list, .sound, .badge])
+        completionHandler([])
         nonisolated(unsafe) let userInfo = notification.request.content.userInfo
         Task { @MainActor in
             _ = await PushNotificationsManager.shared.process(userInfo: userInfo)

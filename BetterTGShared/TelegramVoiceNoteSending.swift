@@ -37,10 +37,11 @@ enum TelegramVoiceNoteSending {
         caption: FormattedText,
         duration: Int,
         waveform: Data,
+        isViewOnce: Bool = false,
     ) -> InputMessageContent {
         .inputMessageVoiceNote(.init(
             caption: caption,
-            selfDestructType: nil,
+            selfDestructType: isViewOnce ? .messageSelfDestructTypeImmediately : nil,
             voiceNote: InputVoiceNote(
                 duration: max(1, duration),
                 voiceNote: .inputFileLocal(.init(path: TelegramMessageSending.localFilePath(url))),
@@ -56,24 +57,36 @@ enum TelegramVoiceNoteSending {
         caption: FormattedText,
         duration: Int,
         waveform: Data,
+        isViewOnce: Bool = false,
         replyTo: InputMessageReplyTo?,
         schedulingState: MessageSchedulingState? = nil,
+        topicId: MessageTopic? = nil,
     ) async throws {
         let caption = await TelegramTextFormatting.addingAutomaticEntities(service: service, to: caption)
         do {
             let messages = try await TelegramMessageSending.send(
                 service: service,
                 chatId: chatId,
-                contents: [content(url: url, caption: caption, duration: duration, waveform: waveform)],
+                contents: [content(
+                    url: url,
+                    caption: caption,
+                    duration: duration,
+                    waveform: waveform,
+                    isViewOnce: isViewOnce,
+                )],
                 replyTo: replyTo,
                 uploadAction: .chatActionUploadingVoiceNote(.init(progress: 0)),
                 schedulingState: schedulingState,
+                topicId: topicId,
                 onAccepted: { messages in
                     guard let message = messages.first else { return }
                     TelegramOutgoingFileStaging.shared.register(
                         fileURL: url,
                         chatId: chatId,
                         temporaryMessageId: message.id,
+                        // The live successful-send message can still reference this upload source,
+                        // just like video notes do. Keep it playable until stale-file cleanup.
+                        successfulSendCleanup: .retainUntilStale,
                     )
                 },
             )

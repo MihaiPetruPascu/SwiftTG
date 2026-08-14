@@ -1,7 +1,43 @@
 // TelegramProxySettings.swift
 
+import Observation
 import SwiftUI
 @preconcurrency import TDLibKit
+
+// MARK: - TelegramProxyShortcutStatus
+
+struct TelegramProxyShortcutStatus: Equatable, Sendable {
+    let value: String
+
+    static func resolve(proxies: [AddedProxy]) -> Self? {
+        guard !proxies.isEmpty else { return nil }
+        guard let enabledProxy = proxies.first(where: \.isEnabled) else {
+            return TelegramProxyShortcutStatus(value: "Disabled")
+        }
+        return TelegramProxyShortcutStatus(value: TelegramProxyType(enabledProxy.proxy.type).title)
+    }
+}
+
+// MARK: - TelegramProxyStatusStore
+
+@MainActor @Observable final class TelegramProxyStatusStore {
+    static let shared = TelegramProxyStatusStore()
+
+    private(set) var shortcutStatus: TelegramProxyShortcutStatus?
+
+    func refresh(service: any TelegramService) async {
+        do {
+            let proxies = try await service.getProxies().proxies
+            update(proxies)
+        } catch {
+            shortcutStatus = nil
+        }
+    }
+
+    func update(_ proxies: [AddedProxy]) {
+        shortcutStatus = TelegramProxyShortcutStatus.resolve(proxies: proxies)
+    }
+}
 
 // MARK: - TelegramProxyType
 
@@ -9,6 +45,17 @@ enum TelegramProxyType: String, CaseIterable, Identifiable {
     case socks5
     case http
     case mtproto
+
+    // MARK: Lifecycle
+
+    init(_ type: ProxyType) {
+        self =
+            switch type {
+            case .proxyTypeSocks5: .socks5
+            case .proxyTypeHttp: .http
+            case .proxyTypeMtproto: .mtproto
+            }
+    }
 
     // MARK: Internal
 
@@ -20,15 +67,6 @@ enum TelegramProxyType: String, CaseIterable, Identifiable {
         case .http: "HTTP"
         case .mtproto: "MTProto"
         }
-    }
-
-    init(_ type: ProxyType) {
-        self =
-            switch type {
-            case .proxyTypeSocks5: .socks5
-            case .proxyTypeHttp: .http
-            case .proxyTypeMtproto: .mtproto
-            }
     }
 }
 
@@ -77,7 +115,9 @@ struct TelegramProxySettingsView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(proxy.proxy.server):\(proxy.proxy.port)")
-                                Text(TelegramProxyType(proxy.proxy.type).title + (proxy.comment.isEmpty ? "" : " · \(proxy.comment)"))
+                                Text(TelegramProxyType(proxy.proxy.type).title + (proxy.comment.isEmpty
+                                        ? ""
+                                        : " · \(proxy.comment)"))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -146,9 +186,10 @@ struct TelegramProxySettingsView: View {
     @State private var hasLoaded = false
     @State private var isAddingProxy = false
     @State private var isWorking = false
-    @State private var proxies: [AddedProxy] = []
+    @State private var proxies = [AddedProxy]()
 
     private let service: any TelegramService
+    private let statusStore = TelegramProxyStatusStore.shared
 
     private var hasEnabledProxy: Bool { proxies.contains { $0.isEnabled } }
 
@@ -166,6 +207,7 @@ struct TelegramProxySettingsView: View {
     @MainActor private func loadProxies() async {
         do {
             proxies = try await service.getProxies().proxies
+            statusStore.update(proxies)
         } catch {
             errorMessage = telegramErrorDescription(error)
         }
@@ -177,11 +219,12 @@ struct TelegramProxySettingsView: View {
         Task {
             defer { isWorking = false }
             do {
-                if let proxyId {
-                    _ = try await service.enableProxy(proxyId: proxyId)
-                } else {
-                    _ = try await service.disableProxy()
-                }
+                _ =
+                    if let proxyId {
+                        try await service.enableProxy(proxyId: proxyId)
+                    } else {
+                        try await service.disableProxy()
+                    }
                 await loadProxies()
             } catch {
                 errorMessage = telegramErrorDescription(error)
@@ -255,7 +298,7 @@ private struct TelegramProxyEditView: View {
                 }
 
                 switch proxyType {
-                case .socks5, .http:
+                case .http, .socks5:
                     Section {
                         TextField("Username (optional)", text: $username)
                             #if os(iOS)
@@ -328,7 +371,7 @@ private struct TelegramProxyEditView: View {
     @State private var password = ""
     @State private var pingResult: String?
     @State private var port: String
-    @State private var proxyType: TelegramProxyType = .socks5
+    @State private var proxyType = TelegramProxyType.socks5
     @State private var secret = ""
     @State private var server: String
     @State private var username = ""
@@ -388,11 +431,17 @@ private struct TelegramProxyEditView: View {
         isSaving = true
         defer { isSaving = false }
         do {
-            if let proxy {
-                _ = try await service.editProxy(comment: comment, enable: proxy.isEnabled, proxy: newProxy, proxyId: proxy.id)
-            } else {
-                _ = try await service.addProxy(comment: comment, enable: true, proxy: newProxy)
-            }
+            _ =
+                if let proxy {
+                    try await service.editProxy(
+                        comment: comment,
+                        enable: proxy.isEnabled,
+                        proxy: newProxy,
+                        proxyId: proxy.id,
+                    )
+                } else {
+                    try await service.addProxy(comment: comment, enable: true, proxy: newProxy)
+                }
             dismiss()
         } catch {
             errorMessage = telegramErrorDescription(error)

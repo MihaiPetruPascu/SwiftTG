@@ -17,6 +17,7 @@ struct MacMessageRow: View {
     let albumMessages: [Message]
     let lastReadOutboxMessageId: Int64
     let showsSenderName: Bool
+    let isChannelMessage: Bool
 
     /// Type-erased for the same reason as iOS's `MessageView.body` - see the comment there. This
     /// row's conditional-branch count (104 `if`/`else if`/`switch` occurrences) is even higher, so
@@ -33,7 +34,7 @@ struct MacMessageRow: View {
     /// "React" and "Delete" are still special-cased below since each renders differently per surface
     /// (a reactions submenu vs. a single toggle; a destructive button with a leading divider vs. plain).
     private enum MacRowAction {
-        case button(title: String, systemImage: String, action: () -> Void)
+        case button(title: String, systemImage: String, isEnabled: Bool = true, action: () -> Void)
         case reactions
     }
 
@@ -43,8 +44,10 @@ struct MacMessageRow: View {
         case preparingPreview
     }
 
+    @Environment(\.telegramBubbleCornerRadius) private var bubbleCornerRadius
     @State private var player = MacVoicePlayer.shared
     @State private var audioPlayer = TelegramAudioPlayer.shared
+    @State private var videoNotePlayer = TelegramVideoNotePlayer.shared
     @State private var documentPath: String?
     @State private var documentPreviewURL: URL?
     @State private var documentDownloadFile: File?
@@ -55,14 +58,23 @@ struct MacMessageRow: View {
     @State private var photoImage: NSImage?
     @State private var photoPath: String?
     @State private var videoThumbnailImage: NSImage?
+    @State private var videoNoteThumbnailImage: NSImage?
+    @State private var gifThumbnailImage: NSImage?
     @State private var voicePath: String?
     @State private var showDeleteOptions = false
     @State private var showReactionOptions = false
     @State private var showReactionDetails = false
+    @State private var isLoadingComments = false
+    @State private var commentsErrorMessage: String?
     @State private var showPhotoPreview = false
     @State private var showVideoPreview = false
+    @State private var showGifPreview = false
     @State private var showForwardPicker = false
     @State private var selectedAlbumMessage: Message?
+    @State private var selectedStickerPack: TelegramStickerPackReference?
+    @State private var pendingStickerFromPack: Sticker?
+    @State private var stickerToEdit: Sticker?
+    @State private var isSavingGif = false
 
     private var capabilities: MacMessageCapabilities? {
         model.messageCapabilities[message.id]
@@ -195,7 +207,8 @@ struct MacMessageRow: View {
 
     private var hasDefaultActivation: Bool {
         voiceFileId != nil || audioFileId != nil || documentFileId != nil || photoFileId != nil
-            || videoFileId != nil || messageContact != nil || locationPresentation != nil
+            || videoFileId != nil || videoNoteFileId != nil || gifFileId != nil || messageContact != nil
+            || locationPresentation != nil
     }
 
     private var photoFileId: Int? {
@@ -223,6 +236,26 @@ struct MacMessageRow: View {
                 .id
         }
         return content.video.thumbnail?.file.id
+    }
+
+    private var videoNoteFileId: Int? {
+        guard case .messageVideoNote(let content) = message.content else { return nil }
+        return content.videoNote.video.id
+    }
+
+    private var videoNoteThumbnailFileId: Int? {
+        guard case .messageVideoNote(let content) = message.content else { return nil }
+        return content.videoNote.thumbnail?.file.id
+    }
+
+    private var gifFileId: Int? {
+        guard case .messageAnimation(let content) = message.content else { return nil }
+        return content.animation.animation.id
+    }
+
+    private var gifThumbnailFileId: Int? {
+        guard case .messageAnimation(let content) = message.content else { return nil }
+        return content.animation.thumbnail?.file.id
     }
 
     private var accessibilityDescription: String {
@@ -266,6 +299,27 @@ struct MacMessageRow: View {
         }
     }
 
+    private var stickerPackReference: TelegramStickerPackReference? {
+        guard case .messageSticker(let content) = message.content else { return nil }
+        return TelegramStickerPackReference(messageSticker: content)
+    }
+
+    private var editableSticker: Sticker? {
+        guard case .messageSticker(let content) = message.content,
+              TelegramStickerPresentation(content.sticker).isEditable
+        else { return nil }
+        return content.sticker
+    }
+
+    private var favoriteStickerAction: TelegramStickerFavoriteAction? {
+        guard case .messageSticker(let content) = message.content else { return nil }
+        return model.favoriteStickers.action(for: content.sticker)
+    }
+
+    private var savableGifFileID: Int? {
+        TelegramMessageGifSaving.fileID(from: message)
+    }
+
     private var isPollMessage: Bool {
         if case .messagePoll = message.content {
             true
@@ -305,6 +359,12 @@ struct MacMessageRow: View {
 
     private var rowActions: [MacRowAction] {
         var items = [MacRowAction]()
+        if isChannelMessage, let replyInfo = message.interactionInfo?.replyInfo {
+            items.append(.button(
+                title: replyInfo.replyCount > 0 ? "View Comments" : "Add Comment",
+                systemImage: "bubble.left",
+            ) { openComments() })
+        }
         if capabilities?.properties.canBeReplied == true {
             items.append(.button(title: "Reply", systemImage: "arrowshape.turn.up.left") {
                 model.beginReply(to: message)
@@ -328,6 +388,30 @@ struct MacMessageRow: View {
         if !reactionChoices.isEmpty {
             items.append(.reactions)
         }
+        if stickerPackReference != nil {
+            items.append(.button(title: "View Sticker Pack", systemImage: "square.stack.3d.up") {
+                selectedStickerPack = stickerPackReference
+            })
+        }
+        if let favoriteStickerAction {
+            items.append(.button(
+                title: favoriteStickerAction.title,
+                systemImage: favoriteStickerAction.systemImage,
+            ) { toggleStickerFavorite() })
+        }
+        if editableSticker != nil {
+            items.append(.button(title: "Edit Sticker", systemImage: "pencil.and.outline") {
+                stickerToEdit = editableSticker
+            })
+        }
+        if savableGifFileID != nil {
+            items.append(.button(
+                title: "Save to GIFs",
+                systemImage: "photo.on.rectangle.angled",
+                isEnabled: !isSavingGif,
+                action: saveGif,
+            ))
+        }
         if canCopy {
             items.append(.button(title: "Copy", systemImage: "doc.on.doc") { copyMessageText() })
         }
@@ -347,6 +431,12 @@ struct MacMessageRow: View {
         }
         if !isVisualAlbum, videoFileId != nil {
             items.append(.button(title: "Play Video", systemImage: "play.rectangle") { showVideoPreview = true })
+        }
+        if videoNoteFileId != nil {
+            items.append(.button(title: "Play Video Message", systemImage: "video.circle") { activateMessage() })
+        }
+        if !isVisualAlbum, gifFileId != nil {
+            items.append(.button(title: "Play GIF", systemImage: "play.rectangle") { showGifPreview = true })
         }
         if let messageContact {
             let presentation = TelegramContactPresentation(messageContact)
@@ -415,6 +505,17 @@ struct MacMessageRow: View {
             parts.append(status)
         }
         return parts.joined(separator: ", ")
+    }
+
+    private var commentsErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { commentsErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    commentsErrorMessage = nil
+                }
+            },
+        )
     }
 
     private var messageRowBody: some View {
@@ -500,11 +601,30 @@ struct MacMessageRow: View {
                             thumbnail: videoThumbnailImage,
                             onOpen: { showVideoPreview = true },
                         )
+                    } else if case .messageVideoNote(let content) = message.content {
+                        MacVideoNoteMessageContent(
+                            message: message,
+                            content: content,
+                            thumbnail: videoNoteThumbnailImage,
+                            service: model.service,
+                            player: videoNotePlayer,
+                        )
+                    } else if case .messageAnimation(let content) = message.content {
+                        MacGifMessageContent(
+                            content: content,
+                            thumbnail: gifThumbnailImage,
+                            onOpen: { showGifPreview = true },
+                        )
                     } else if case .messageVoiceNote(let content) = message.content {
                         MacVoiceMessageContent(
                             caption: content.caption,
                             voiceNote: content.voiceNote,
+                            isViewOnce: message.selfDestructType == .messageSelfDestructTypeImmediately,
                             path: voicePath,
+                            onPlaybackToggle: {
+                                guard let voicePath else { return }
+                                Task { await activateVoiceMessage(content: content, path: voicePath) }
+                            },
                             player: player,
                         )
                     } else if case .messageAudio(let content) = message.content {
@@ -581,12 +701,18 @@ struct MacMessageRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
+
+                    if isChannelMessage, let replyInfo = message.interactionInfo?.replyInfo {
+                        TelegramCommentsBar(replyCount: replyInfo.replyCount, isLoading: isLoadingComments) {
+                            openComments()
+                        }
+                    }
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 8)
                 .background {
                     if !isStickerMessage {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: bubbleCornerRadius)
                             .fill(
                                 isServiceMessage
                                     ? Color.secondary.opacity(0.12)
@@ -651,6 +777,25 @@ struct MacMessageRow: View {
             videoThumbnailImage = await Self.decodedImage(atPath: path)
         }
         .task(id: presentationTaskID) {
+            guard let videoNoteThumbnailFileId,
+                  let path = await model.localPhotoPath(fileId: videoNoteThumbnailFileId)
+            else {
+                videoNoteThumbnailImage = nil
+                return
+            }
+            videoNoteThumbnailImage = await Self.decodedImage(atPath: path)
+        }
+        .task(id: presentationTaskID) {
+            guard !isVisualAlbum,
+                  let gifThumbnailFileId,
+                  let path = await model.localPhotoPath(fileId: gifThumbnailFileId)
+            else {
+                gifThumbnailImage = nil
+                return
+            }
+            gifThumbnailImage = await Self.decodedImage(atPath: path)
+        }
+        .task(id: presentationTaskID) {
             await model.loadCapabilities(for: message)
         }
         .task(id: presentationTaskID) {
@@ -705,6 +850,15 @@ struct MacMessageRow: View {
                 )
             }
         }
+        .sheet(isPresented: $showGifPreview) {
+            if case .messageAnimation(let content) = message.content {
+                MacGifPreview(
+                    model: model,
+                    fileId: content.animation.animation.id,
+                    caption: content.caption.text,
+                )
+            }
+        }
         .sheet(isPresented: $showVideoPreview) {
             if case .messageVideo(let content) = message.content {
                 MacVideoPreview(
@@ -719,12 +873,51 @@ struct MacMessageRow: View {
         .sheet(item: $selectedAlbumMessage) { albumMessage in
             MacAlbumMediaPreview(model: model, message: albumMessage)
         }
+        .sheet(item: $selectedStickerPack) { reference in
+            TelegramStickerPackPreview(
+                reference: reference,
+                service: model.service,
+                chatId: message.chatId,
+                onSelect: { pendingStickerFromPack = $0 },
+                preview: { sticker in
+                    MacStickerView(
+                        model: model,
+                        sticker: sticker,
+                        maxSide: 76,
+                        playsAnimation: false,
+                    )
+                },
+            )
+        }
+        .sheet(item: $stickerToEdit) { sticker in
+            TelegramStickerEditor(
+                sticker: sticker,
+                service: model.service,
+                chatId: message.chatId,
+                actionTitle: "Send",
+                onSave: { output, emojis in
+                    try await TelegramStickerEditing.sendEditedSticker(
+                        output: output,
+                        emojis: emojis,
+                        service: model.service,
+                        chatId: message.chatId,
+                        topicId: model.openedTopic,
+                    )
+                },
+            )
+        }
+        .task(id: pendingStickerFromPack?.sticker.id) { await sendPendingStickerFromPack() }
         .sheet(isPresented: $showReactionDetails) {
             TelegramReactionDetailsView(
                 service: model.service,
                 chatId: message.chatId,
                 messageId: message.id,
             )
+        }
+        .alert("Couldn't Open Comments", isPresented: commentsErrorIsPresented) {
+            Button("OK") {}
+        } message: {
+            Text(commentsErrorMessage ?? "")
         }
         .sheet(isPresented: $showForwardPicker) {
             MacForwardChatPicker(model: model, message: message)
@@ -735,8 +928,9 @@ struct MacMessageRow: View {
     @ViewBuilder private var messageActions: some View {
         ForEach(Array(rowActions.enumerated()), id: \.offset) { _, item in
             switch item {
-            case .button(let title, let systemImage, let action):
+            case .button(let title, let systemImage, let isEnabled, let action):
                 Button(title, systemImage: systemImage, action: action)
+                    .disabled(!isEnabled)
             case .reactions:
                 Menu("React", systemImage: "face.smiling") {
                     ForEach(reactionChoices, id: \.self) { reaction in
@@ -764,8 +958,9 @@ struct MacMessageRow: View {
             : [])
         ForEach(Array(items.reversed().enumerated()), id: \.offset) { _, item in
             switch item {
-            case .button(let title, _, let action):
+            case .button(let title, _, let isEnabled, let action):
                 Button(title, action: action)
+                    .disabled(!isEnabled)
             case .reactions:
                 Button("React") { showReactionOptions = true }
             }
@@ -884,6 +1079,57 @@ struct MacMessageRow: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    private func toggleStickerFavorite() {
+        guard case .messageSticker(let content) = message.content,
+              favoriteStickerAction != nil
+        else { return }
+        model.messageActionError = nil
+        Task { @MainActor in
+            do {
+                try await model.favoriteStickers.toggle(content.sticker)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.messageActionError = "Favorites couldn't be updated: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    private func saveGif() {
+        guard let fileID = savableGifFileID, !isSavingGif else { return }
+        isSavingGif = true
+        model.messageActionError = nil
+        Task { @MainActor in
+            defer { isSavingGif = false }
+            do {
+                try await TelegramMessageGifSaving.save(fileID: fileID, service: model.service)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.messageActionError = "GIF couldn't be saved: \(telegramErrorDescription(error))"
+            }
+        }
+    }
+
+    @MainActor private func sendPendingStickerFromPack() async {
+        guard let sticker = pendingStickerFromPack else { return }
+        defer { pendingStickerFromPack = nil }
+        model.messageActionError = nil
+        do {
+            try await TelegramStickerSending.send(
+                sticker,
+                service: model.service,
+                chatId: message.chatId,
+                replyToMessageId: nil,
+                topicId: model.openedTopic,
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            model.messageActionError = "Sticker couldn't be sent: \(telegramErrorDescription(error))"
+        }
+    }
+
     private func openDocument() {
         guard let documentFileId,
               case .messageDocument(let content) = message.content
@@ -902,7 +1148,6 @@ struct MacMessageRow: View {
         isLoadingDocument = true
         model.messageActionError = nil
         documentTransferPhase = documentPath == nil ? .downloading : .preparingPreview
-        announceDocumentTransferStatus()
         Task { @MainActor in
             defer {
                 if documentTransferID == transferID {
@@ -930,7 +1175,6 @@ struct MacMessageRow: View {
                 }
                 if documentTransferPhase != .preparingPreview {
                     documentTransferPhase = .preparingPreview
-                    announceDocumentTransferStatus(prefix: "Download complete. ")
                 }
                 documentPreviewURL = try await TelegramDocumentExport.previewURL(
                     sourceURL: URL(filePath: resolvedPath),
@@ -949,7 +1193,6 @@ struct MacMessageRow: View {
         documentTransferID = nil
         isLoadingDocument = false
         documentTransferPhase = .paused
-        announceDocumentTransferStatus()
         let service = model.service
         documentDownloadCancellationTask = Task {
             _ = try? await service.cancelDownloadFile(
@@ -957,20 +1200,6 @@ struct MacMessageRow: View {
                 onlyIfPending: false,
             )
         }
-    }
-
-    private func announceDocumentTransferStatus(prefix: String = "") {
-        guard let documentTransferStatus,
-              let window = NSApp.keyWindow ?? NSApp.mainWindow
-        else { return }
-        NSAccessibility.post(
-            element: window,
-            notification: .announcementRequested,
-            userInfo: [
-                .announcement: prefix + documentTransferStatus,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue,
-            ],
-        )
     }
 
     private func saveDocument() {
@@ -1011,15 +1240,43 @@ struct MacMessageRow: View {
         }
     }
 
+    /// Resolves the comment thread's discussion group/`messageThreadId` before switching to it -
+    /// mirrors iOS's `openComments()`, so there's no empty screen that fills in after the fact.
+    private func openComments() {
+        guard !isLoadingComments else { return }
+        isLoadingComments = true
+        commentsErrorMessage = nil
+
+        Task {
+            defer { isLoadingComments = false }
+            do {
+                let thread = try await model.service.getMessageThread(
+                    chatId: message.chatId,
+                    messageId: message.id,
+                )
+                let replyCount = message.interactionInfo?.replyInfo?.replyCount ?? 0
+                let title = replyCount > 0 ? "\(replyCount) Comment\(replyCount == 1 ? "" : "s")" : "Comments"
+                await model.openCommentThread(
+                    discussionChatId: thread.chatId,
+                    messageThreadId: thread.messageThreadId,
+                    title: title,
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                commentsErrorMessage = telegramErrorDescription(error)
+            }
+        }
+    }
+
     private func activateMessage() {
-        if case .messageVoiceNote(let content) = message.content, let voicePath {
+        if case .messageVideoNote(let content) = message.content {
+            player.stop()
             audioPlayer.stop()
-            player.toggle(
-                fileId: content.voiceNote.voice.id,
-                path: voicePath,
-                duration: content.voiceNote.duration,
-            )
+            videoNotePlayer.toggle(message: message, content: content, service: model.service)
+        } else if case .messageVoiceNote(let content) = message.content, let voicePath {
+            Task { await activateVoiceMessage(content: content, path: voicePath) }
         } else if case .messageAudio(let content) = message.content {
+            videoNotePlayer.stop()
             player.stop()
             audioPlayer.toggle(
                 audio: content.audio,
@@ -1031,7 +1288,11 @@ struct MacMessageRow: View {
         } else if case .messagePhoto = message.content, photoImage != nil {
             showPhotoPreview = true
         } else if case .messageVideo = message.content {
+            videoNotePlayer.stop()
             showVideoPreview = true
+        } else if case .messageAnimation = message.content {
+            videoNotePlayer.stop()
+            showGifPreview = true
         } else if let messageContact {
             let presentation = TelegramContactPresentation(messageContact)
             if presentation.hasTelegramAccount {
@@ -1045,6 +1306,36 @@ struct MacMessageRow: View {
             guard let url = URL(string: "http://maps.apple.com/?ll=\(latitude),\(longitude)") else { return }
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private func activateVoiceMessage(content: MessageVoiceNote, path: String) async {
+        let presentation = TelegramVoiceNotePresentation(message: message, content: content)
+        if presentation.shouldOpenMessageContent {
+            if model.openedViewOnceVoiceNoteMessageIds.contains(message.id) {
+                guard player.currentFileId == content.voiceNote.voice.id else { return }
+            } else {
+                guard model.openingViewOnceVoiceNoteMessageIds.insert(message.id).inserted else { return }
+                defer { model.openingViewOnceVoiceNoteMessageIds.remove(message.id) }
+                do {
+                    _ = try await model.service.openMessageContent(chatId: message.chatId, messageId: message.id)
+                    guard !Task.isCancelled else { return }
+                    model.openedViewOnceVoiceNoteMessageIds.insert(message.id)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    model.messageActionError =
+                        "Voice message couldn't be opened: \(telegramErrorDescription(error))"
+                    return
+                }
+            }
+        }
+        videoNotePlayer.stop()
+        audioPlayer.stop()
+        player.toggle(
+            fileId: content.voiceNote.voice.id,
+            path: path,
+            duration: content.voiceNote.duration,
+            allowsSeeking: presentation.allowsSeeking,
+        )
     }
 }
 
@@ -1095,6 +1386,9 @@ struct MacMessageRow: View {
         parts.append(status)
     }
     if case .messageVoiceNote(let content) = message.content {
+        if message.selfDestructType == .messageSelfDestructTypeImmediately {
+            parts.append("view once")
+        }
         let elapsed = voicePlayer.currentFileId == content.voiceNote.voice.id
             ? voicePlayer.currentTime
             : 0
@@ -1102,6 +1396,12 @@ struct MacMessageRow: View {
             duration: content.voiceNote.duration,
             elapsed: elapsed,
         ))
+    }
+    if case .messageVideoNote(let content) = message.content {
+        parts.append(TelegramVideoNotePresentation(
+            content,
+            isOutgoing: message.isOutgoing,
+        ).accessibilityDetails)
     }
     if case .messageAudio(let content) = message.content {
         let elapsed = audioPlayer.currentFileId == content.audio.audio.id
@@ -1160,6 +1460,7 @@ private func copyableMessageText(_ message: Message) -> String? {
     case .messageText(let content): content.text.text.isEmpty ? nil : content.text.text
     case .messagePhoto(let content): content.caption.text.isEmpty ? nil : content.caption.text
     case .messageVideo(let content): content.caption.text.isEmpty ? nil : content.caption.text
+    case .messageAnimation(let content): content.caption.text.isEmpty ? nil : content.caption.text
     case .messageVoiceNote(let content): content.caption.text.isEmpty ? nil : content.caption.text
     case .messageAudio(let content): content.caption.text.isEmpty ? nil : content.caption.text
     case .messageDocument(let content): content.caption.text.isEmpty ? nil : content.caption.text
@@ -1172,6 +1473,7 @@ private func editableMessageText(_ message: Message) -> String? {
     case .messageText(let content): content.text.text
     case .messagePhoto(let content): content.caption.text
     case .messageVideo(let content): content.caption.text
+    case .messageAnimation(let content): content.caption.text
     case .messageVoiceNote(let content): content.caption.text
     case .messageAudio(let content): content.caption.text
     case .messageDocument(let content): content.caption.text

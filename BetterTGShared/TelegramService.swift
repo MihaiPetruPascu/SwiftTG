@@ -15,6 +15,9 @@ protocol TelegramContactsSyncing: Sendable {
 protocol TelegramService: TelegramContactsSyncing, Sendable {
     var authorizationStatePublisher: AnyPublisher<AuthorizationState, Never> { get }
     var chatListPublisher: AnyPublisher<ChatListSnapshot, Never> { get }
+    var chatFoldersPublisher: AnyPublisher<UpdateChatFolders?, Never> { get }
+    var unreadChatCountPublisher: AnyPublisher<UpdateUnreadChatCount?, Never> { get }
+    var availableMessageEffectsPublisher: AnyPublisher<UpdateAvailableMessageEffects?, Never> { get }
     var updatePublisher: AnyPublisher<Update, Never> { get }
 
     func filePublisher(fileId: Int) -> AnyPublisher<File, Never>
@@ -47,7 +50,25 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func createCall(isVideo: Bool?, protocol: CallProtocol?, userId: Int64?) async throws -> CallId
     func createBasicGroupChat(basicGroupId: Int64?, force: Bool?) async throws -> Chat
     func createPrivateChat(force: Bool?, userId: Int64?) async throws -> Chat
+    func createNewSecretChat(userId: Int64?) async throws -> Chat
     func createSupergroupChat(force: Bool?, supergroupId: Int64?) async throws -> Chat
+    func createNewBasicGroupChat(
+        messageAutoDeleteTime: Int?,
+        title: String?,
+        userIds: [Int64]?,
+    ) async throws -> CreatedBasicGroupChat
+    func createNewSupergroupChat(
+        description: String?,
+        forImport: Bool?,
+        isChannel: Bool?,
+        isForum: Bool?,
+        location: ChatLocation?,
+        messageAutoDeleteTime: Int?,
+        title: String?,
+    ) async throws -> Chat
+    func setChatPhoto(chatId: Int64?, photo: InputChatPhoto?) async throws -> Ok
+    func checkChatUsername(chatId: Int64?, username: String?) async throws -> CheckChatUsernameResult
+    func setSupergroupUsername(supergroupId: Int64?, username: String?) async throws -> Ok
     func deleteChat(chatId: Int64?) async throws -> Ok
     func deleteChatHistory(chatId: Int64?, removeFromChatList: Bool?, revoke: Bool?) async throws -> Ok
     func deleteMessages(chatId: Int64?, messageIds: [Int64]?, revoke: Bool?) async throws -> Ok
@@ -62,6 +83,7 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func sendCallSignalingData(callId: Int?, data: Data?) async throws -> Ok
     func downloadFile(fileId: Int?, limit: Int64?, offset: Int64?, priority: Int?, synchronous: Bool?) async throws
         -> File
+    func openMessageContent(chatId: Int64?, messageId: Int64?) async throws -> Ok
     func editMessageCaption(
         caption: FormattedText?,
         chatId: Int64?,
@@ -98,6 +120,15 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func getBasicGroupFullInfo(basicGroupId: Int64?) async throws -> BasicGroupFullInfo
     func getChat(chatId: Int64?) async throws -> Chat
     func getChatFolder(chatFolderId: Int?) async throws -> ChatFolder
+    func createChatFolder(folder: ChatFolder?) async throws -> ChatFolderInfo
+    func editChatFolder(chatFolderId: Int?, folder: ChatFolder?) async throws -> ChatFolderInfo
+    func deleteChatFolder(chatFolderId: Int?, leaveChatIds: [Int64]?) async throws -> Ok
+    func getChatFolderChatsToLeave(chatFolderId: Int?) async throws -> Chats
+    func getChatFolderChatCount(folder: ChatFolder?) async throws -> Count
+    func reorderChatFolders(chatFolderIds: [Int]?, mainChatListPosition: Int?) async throws -> Ok
+    func toggleChatFolderTags(areTagsEnabled: Bool?) async throws -> Ok
+    func getRecommendedChatFolders() async throws -> RecommendedChatFolders
+    func getChatFolderDefaultIconName(folder: ChatFolder?) async throws -> ChatFolderIcon
     func getChatScheduledMessages(chatId: Int64?) async throws -> Messages
     func editMessageSchedulingState(
         chatId: Int64?,
@@ -112,13 +143,23 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         onlyLocal: Bool?,
     ) async throws -> Messages
     func getChats(chatList: ChatList?, limit: Int?) async throws -> Chats
+    func loadChats(chatList: ChatList?, limit: Int?) async throws -> Ok
     func getContacts() async throws -> Users
+    func removeContacts(userIds: [Int64]?) async throws -> Ok
+    func getTopChats(category: TopChatCategory?, limit: Int?) async throws -> Chats
+    func removeTopChat(category: TopChatCategory?, chatId: Int64?) async throws -> Ok
+    func deleteSavedOrderInfo() async throws -> Ok
+    func deleteSavedCredentials() async throws -> Ok
     func getAuthorizationState() async throws -> AuthorizationState
     func getCountries() async throws -> Countries
     func getCountryCode() async throws -> Text
     func getGroupsInCommon(limit: Int?, offsetChatId: Int64?, userId: Int64?) async throws -> Chats
     func getStorageStatisticsFast() async throws -> StorageStatisticsFast
+    func getEmojiCategories(type: EmojiCategoryType?) async throws -> EmojiCategories
     func getInstalledStickerSets(stickerType: StickerType?) async throws -> StickerSets
+    func getPremiumStickers(limit: Int?) async throws -> Stickers
+    func getTrendingStickerSets(limit: Int?, offset: Int?, stickerType: StickerType?) async throws
+        -> TrendingStickerSets
     func getMessage(chatId: Int64?, messageId: Int64?) async throws -> Message
     func getMessageAvailableReactions(
         chatId: Int64?,
@@ -141,8 +182,14 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         optionId: Int?,
     ) async throws -> PollVoters
     func getRecentStickers(isAttached: Bool?) async throws -> Stickers
+    func removeRecentSticker(isAttached: Bool?, sticker: InputFile?) async throws -> Ok
+    func clearRecentStickers(isAttached: Bool?) async throws -> Ok
+    func getFavoriteStickers() async throws -> Stickers
+    func addFavoriteSticker(sticker: InputFile?) async throws -> Ok
+    func removeFavoriteSticker(sticker: InputFile?) async throws -> Ok
     func getActiveSessions() async throws -> Sessions
     func terminateSession(sessionId: TdInt64?) async throws -> Ok
+    func confirmSession(sessionId: TdInt64?) async throws -> Ok
     func terminateAllOtherSessions() async throws -> Ok
     func getStickerSet(setId: TdInt64?) async throws -> StickerSet
     func searchStickerSet(ignoreCache: Bool?, name: String?) async throws -> StickerSet
@@ -152,6 +199,43 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         query: String?,
         stickerType: StickerType?,
     ) async throws -> Stickers
+    /// Searches the public sticker catalog, not just installed sets - unlike `getStickers`, which
+    /// only ever returns stickers from sets the user already has.
+    func searchStickers(
+        emojis: String?,
+        inputLanguageCodes: [String]?,
+        limit: Int?,
+        offset: Int?,
+        query: String?,
+        stickerType: StickerType?,
+    ) async throws -> Stickers
+    func searchInstalledStickerSets(limit: Int?, query: String?, stickerType: StickerType?) async throws -> StickerSets
+    /// `searchStickers` is fundamentally emoji-driven ("stickers... that correspond to any of the
+    /// given emoji") - real Telegram clients resolve a typed keyword to emoji with this call first,
+    /// the same way this app's own catalog sticker search needs to.
+    func searchEmojis(inputLanguageCodes: [String]?, text: String?) async throws -> EmojiKeywords
+    func getSavedAnimations() async throws -> Animations
+    func addSavedAnimation(animation: InputFile?) async throws -> Ok
+    func removeSavedAnimation(animation: InputFile?) async throws -> Ok
+    /// Queries an inline bot (e.g. Telegram's own GIF-search bot, whose username comes from
+    /// `getOption("animation_search_bot_username")`) the same way real Telegram clients back GIF
+    /// search - TDLib has no direct "search GIFs" call of its own.
+    func getInlineQueryResults(
+        botUserId: Int64?,
+        chatId: Int64?,
+        offset: String?,
+        query: String?,
+        userLocation: Location?,
+    ) async throws -> InlineQueryResults
+    func sendInlineQueryResultMessage(
+        chatId: Int64?,
+        hideViaBot: Bool?,
+        options: MessageSendOptions?,
+        queryId: TdInt64?,
+        replyTo: InputMessageReplyTo?,
+        resultId: String?,
+        topicId: MessageTopic?,
+    ) async throws -> Message
     func uploadStickerFile(sticker: InputFile?, stickerFormat: StickerFormat?, userId: Int64?) async throws -> File
     func getSuggestedStickerSetName(title: String?) async throws -> Text
     func checkStickerSetName(name: String?) async throws -> CheckStickerSetNameResult
@@ -165,10 +249,18 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         userId: Int64?,
     ) async throws -> StickerSet
     func addStickerToSet(name: String?, sticker: NewSticker?, userId: Int64?) async throws -> Ok
+    func replaceStickerInSet(
+        name: String?,
+        newSticker: NewSticker?,
+        oldSticker: InputFile?,
+        userId: Int64?,
+    ) async throws -> Ok
     func changeStickerSet(isArchived: Bool?, isInstalled: Bool?, setId: TdInt64?) async throws -> Ok
+    func viewTrendingStickerSets(stickerSetIds: [TdInt64]?) async throws -> Ok
     func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders
     func getLinkPreview(linkPreviewOptions: LinkPreviewOptions?, text: FormattedText?) async throws -> LinkPreview
     func getMe() async throws -> User
+    func getMessageEffect(effectId: TdInt64?) async throws -> MessageEffect
     func getScopeNotificationSettings(scope: NotificationSettingsScope?) async throws -> ScopeNotificationSettings
     func getSupergroup(supergroupId: Int64?) async throws -> Supergroup
     func getSupergroupFullInfo(supergroupId: Int64?) async throws -> SupergroupFullInfo
@@ -189,10 +281,13 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         supergroupId: Int64?,
     ) async throws -> ChatMembers
     func leaveChat(chatId: Int64?) async throws -> Ok
+    func joinChat(chatId: Int64?) async throws -> ChatJoinResult
     func openChat(chatId: Int64?) async throws -> Ok
     func pinChatMessage(chatId: Int64?, disableNotification: Bool?, messageId: Int64?, onlyForSelf: Bool?) async throws
         -> Ok
     func processPushNotification(payload: String?) async throws -> Ok
+    func preliminaryUploadFile(file: InputFile?, fileType: FileType?, priority: Int?) async throws -> File
+    func cancelPreliminaryUploadFile(fileId: Int?) async throws -> Ok
     func registerDevice(deviceToken: DeviceToken?, otherUserIds: [Int64]?) async throws -> PushReceiverId
     func sendChatAction(
         action: ChatAction?,
@@ -215,7 +310,54 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         replyTo: InputMessageReplyTo?,
         topicId: MessageTopic?,
     ) async throws -> Messages
+    func getMessageThread(chatId: Int64?, messageId: Int64?) async throws -> MessageThreadInfo
+    func getMessageThreadHistory(
+        chatId: Int64?,
+        fromMessageId: Int64?,
+        limit: Int?,
+        messageId: Int64?,
+        offset: Int?,
+    ) async throws -> Messages
+    func getForumTopics(
+        chatId: Int64?,
+        limit: Int?,
+        offsetDate: Int?,
+        offsetForumTopicId: Int?,
+        offsetMessageId: Int64?,
+        query: String?,
+    ) async throws -> ForumTopics
+    func getForumTopic(chatId: Int64?, forumTopicId: Int?) async throws -> ForumTopic
+    func getForumTopicHistory(
+        chatId: Int64?,
+        forumTopicId: Int?,
+        fromMessageId: Int64?,
+        limit: Int?,
+        offset: Int?,
+    ) async throws -> Messages
+    func createForumTopic(
+        chatId: Int64?,
+        icon: ForumTopicIcon?,
+        isNameImplicit: Bool?,
+        name: String?,
+    ) async throws -> ForumTopicInfo
+    func editForumTopic(
+        chatId: Int64?,
+        editIconCustomEmoji: Bool?,
+        forumTopicId: Int?,
+        iconCustomEmojiId: TdInt64?,
+        name: String?,
+    ) async throws -> Ok
+    func deleteForumTopic(chatId: Int64?, forumTopicId: Int?) async throws -> Ok
+    func toggleForumTopicIsClosed(chatId: Int64?, forumTopicId: Int?, isClosed: Bool?) async throws -> Ok
+    func toggleForumTopicIsPinned(chatId: Int64?, forumTopicId: Int?, isPinned: Bool?) async throws -> Ok
+    func setForumTopicNotificationSettings(
+        chatId: Int64?,
+        forumTopicId: Int?,
+        notificationSettings: ChatNotificationSettings?,
+    ) async throws -> Ok
+    func getForumTopicDefaultIcons() async throws -> Stickers
     func searchChats(limit: Int?, query: String?, typeFilter: SearchChatTypeFilter?) async throws -> Chats
+    func searchPublicChats(query: String?, typeFilter: SearchChatTypeFilter?) async throws -> Chats
     func searchChatMembers(
         chatId: Int64?,
         filter: ChatMembersFilter?,
@@ -265,6 +407,17 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func setMessageSenderBlockList(blockList: BlockList?, senderId: MessageSender?) async throws -> Ok
     func getUserPrivacySettingRules(setting: UserPrivacySetting?) async throws -> UserPrivacySettingRules
     func setUserPrivacySettingRules(rules: UserPrivacySettingRules?, setting: UserPrivacySetting?) async throws -> Ok
+    func getConnectedWebsites() async throws -> ConnectedWebsites
+    func disconnectWebsite(websiteId: TdInt64?) async throws -> Ok
+    func disconnectAllWebsites() async throws -> Ok
+    func getAccountTtl() async throws -> AccountTtl
+    func setAccountTtl(ttl: AccountTtl?) async throws -> Ok
+    func getArchiveChatListSettings() async throws -> ArchiveChatListSettings
+    func setArchiveChatListSettings(settings: ArchiveChatListSettings?) async throws -> Ok
+    func getLoginPasskeys() async throws -> Passkeys
+    func removeLoginPasskey(passkeyId: String?) async throws -> Ok
+    func getNewChatPrivacySettings() async throws -> NewChatPrivacySettings
+    func setNewChatPrivacySettings(settings: NewChatPrivacySettings?) async throws -> Ok
     func setScopeNotificationSettings(
         notificationSettings: ScopeNotificationSettings?,
         scope: NotificationSettingsScope?,
@@ -276,6 +429,7 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func getAutoDownloadSettingsPresets() async throws -> AutoDownloadSettingsPresets
     func setAutoDownloadSettings(settings: AutoDownloadSettings?, type: NetworkType?) async throws -> Ok
     func getPasswordState() async throws -> PasswordState
+    func getRecoveryEmailAddress(password: String?) async throws -> RecoveryEmailAddress
     func setPassword(
         newHint: String?,
         newPassword: String?,
@@ -283,6 +437,9 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
         oldPassword: String?,
         setRecoveryEmailAddress: Bool?,
     ) async throws -> PasswordState
+    func checkRecoveryEmailAddressCode(code: String?) async throws -> PasswordState
+    func resendRecoveryEmailAddressCode() async throws -> PasswordState
+    func cancelRecoveryEmailAddressVerification() async throws -> PasswordState
     func addProxy(comment: String?, enable: Bool?, proxy: Proxy?) async throws -> AddedProxy
     func editProxy(comment: String?, enable: Bool?, proxy: Proxy?, proxyId: Int?) async throws -> AddedProxy
     func enableProxy(proxyId: Int?) async throws -> Ok
@@ -290,11 +447,21 @@ protocol TelegramService: TelegramContactsSyncing, Sendable {
     func removeProxy(proxyId: Int?) async throws -> Ok
     func getProxies() async throws -> AddedProxies
     func pingProxy(proxy: Proxy?) async throws -> Seconds
+    func getInternalLinkType(link: String?) async throws -> InternalLinkType
+    func getMessageLinkInfo(url: String?) async throws -> MessageLinkInfo
+    func searchPublicChat(username: String?) async throws -> Chat
+    func checkChatInviteLink(inviteLink: String?) async throws -> ChatInviteLinkInfo
+    func joinChatByInviteLink(inviteLink: String?) async throws -> ChatJoinResult
+    func searchUserByPhoneNumber(onlyLocal: Bool?, phoneNumber: String?) async throws -> User
+    func sendBotStartMessage(botUserId: Int64?, chatId: Int64?, parameter: String?) async throws -> Message
     func setName(firstName: String?, lastName: String?) async throws -> Ok
     func setBio(bio: String?) async throws -> Ok
     func setUsername(username: String?) async throws -> Ok
     func setProfilePhoto(isPublic: Bool?, photo: InputChatPhoto?) async throws -> Ok
     func setOption(name: String?, value: OptionValue?) async throws -> Ok
+    func getOption(name: String?) async throws -> OptionValue
+    func getDefaultMessageAutoDeleteTime() async throws -> MessageAutoDeleteTime
+    func setDefaultMessageAutoDeleteTime(messageAutoDeleteTime: MessageAutoDeleteTime?) async throws -> Ok
     func setPollAnswer(chatId: Int64?, messageId: Int64?, optionIds: [Int]?) async throws -> Ok
     func markChecklistTasksAsDone(
         chatId: Int64?,
@@ -360,6 +527,18 @@ extension TelegramSession: TelegramService {
         try await client.setOption(name: name, value: value)
     }
 
+    func getOption(name: String?) async throws -> OptionValue {
+        try await client.getOption(name: name)
+    }
+
+    func getDefaultMessageAutoDeleteTime() async throws -> MessageAutoDeleteTime {
+        try await client.getDefaultMessageAutoDeleteTime()
+    }
+
+    func setDefaultMessageAutoDeleteTime(messageAutoDeleteTime: MessageAutoDeleteTime?) async throws -> Ok {
+        try await client.setDefaultMessageAutoDeleteTime(messageAutoDeleteTime: messageAutoDeleteTime)
+    }
+
     func optimizeStorage(
         chatIds: [Int64]?,
         chatLimit: Int?,
@@ -395,6 +574,14 @@ extension TelegramSession: TelegramService {
         try await client.processPushNotification(payload: payload)
     }
 
+    func preliminaryUploadFile(file: InputFile?, fileType: FileType?, priority: Int?) async throws -> File {
+        try await client.preliminaryUploadFile(file: file, fileType: fileType, priority: priority)
+    }
+
+    func cancelPreliminaryUploadFile(fileId: Int?) async throws -> Ok {
+        try await client.cancelPreliminaryUploadFile(fileId: fileId)
+    }
+
     func registerDevice(deviceToken: DeviceToken?, otherUserIds: [Int64]?) async throws -> PushReceiverId {
         try await client.registerDevice(deviceToken: deviceToken, otherUserIds: otherUserIds)
     }
@@ -405,6 +592,26 @@ extension TelegramSession: TelegramService {
 
     func getContacts() async throws -> Users {
         try await client.getContacts()
+    }
+
+    func removeContacts(userIds: [Int64]?) async throws -> Ok {
+        try await client.removeContacts(userIds: userIds)
+    }
+
+    func getTopChats(category: TopChatCategory?, limit: Int?) async throws -> Chats {
+        try await client.getTopChats(category: category, limit: limit)
+    }
+
+    func removeTopChat(category: TopChatCategory?, chatId: Int64?) async throws -> Ok {
+        try await client.removeTopChat(category: category, chatId: chatId)
+    }
+
+    func deleteSavedOrderInfo() async throws -> Ok {
+        try await client.deleteSavedOrderInfo()
+    }
+
+    func deleteSavedCredentials() async throws -> Ok {
+        try await client.deleteSavedCredentials()
     }
 
     func importContacts(contacts: [ImportedContact]?) async throws -> ImportedContacts {
@@ -419,12 +626,60 @@ extension TelegramSession: TelegramService {
         try await client.createSupergroupChat(force: force, supergroupId: supergroupId)
     }
 
+    func createNewBasicGroupChat(
+        messageAutoDeleteTime: Int?,
+        title: String?,
+        userIds: [Int64]?,
+    ) async throws -> CreatedBasicGroupChat {
+        try await client.createNewBasicGroupChat(
+            messageAutoDeleteTime: messageAutoDeleteTime,
+            title: title,
+            userIds: userIds,
+        )
+    }
+
+    func createNewSupergroupChat(
+        description: String?,
+        forImport: Bool?,
+        isChannel: Bool?,
+        isForum: Bool?,
+        location: ChatLocation?,
+        messageAutoDeleteTime: Int?,
+        title: String?,
+    ) async throws -> Chat {
+        try await client.createNewSupergroupChat(
+            description: description,
+            forImport: forImport,
+            isChannel: isChannel,
+            isForum: isForum,
+            location: location,
+            messageAutoDeleteTime: messageAutoDeleteTime,
+            title: title,
+        )
+    }
+
+    func setChatPhoto(chatId: Int64?, photo: InputChatPhoto?) async throws -> Ok {
+        try await client.setChatPhoto(chatId: chatId, photo: photo)
+    }
+
+    func checkChatUsername(chatId: Int64?, username: String?) async throws -> CheckChatUsernameResult {
+        try await client.checkChatUsername(chatId: chatId, username: username)
+    }
+
+    func setSupergroupUsername(supergroupId: Int64?, username: String?) async throws -> Ok {
+        try await client.setSupergroupUsername(supergroupId: supergroupId, username: username)
+    }
+
     func deleteChat(chatId: Int64?) async throws -> Ok {
         try await client.deleteChat(chatId: chatId)
     }
 
     func searchChats(limit: Int?, query: String?, typeFilter: SearchChatTypeFilter?) async throws -> Chats {
         try await client.searchChats(limit: limit, query: query, typeFilter: typeFilter)
+    }
+
+    func searchPublicChats(query: String?, typeFilter: SearchChatTypeFilter?) async throws -> Chats {
+        try await client.searchPublicChats(query: query, typeFilter: typeFilter)
     }
 
     func searchChatMembers(
@@ -576,6 +831,10 @@ extension TelegramSession: TelegramService {
         try await client.createPrivateChat(force: force, userId: userId)
     }
 
+    func createNewSecretChat(userId: Int64?) async throws -> Chat {
+        try await client.createNewSecretChat(userId: userId)
+    }
+
     func deleteChatHistory(chatId: Int64?, removeFromChatList: Bool?, revoke: Bool?) async throws -> Ok {
         try await client.deleteChatHistory(
             chatId: chatId,
@@ -604,6 +863,10 @@ extension TelegramSession: TelegramService {
         )
         mergeInitialFile(file)
         return file
+    }
+
+    func openMessageContent(chatId: Int64?, messageId: Int64?) async throws -> Ok {
+        try await client.openMessageContent(chatId: chatId, messageId: messageId)
     }
 
     func editMessageCaption(
@@ -720,6 +983,42 @@ extension TelegramSession: TelegramService {
         try await client.getChatFolder(chatFolderId: chatFolderId)
     }
 
+    func createChatFolder(folder: ChatFolder?) async throws -> ChatFolderInfo {
+        try await client.createChatFolder(folder: folder)
+    }
+
+    func editChatFolder(chatFolderId: Int?, folder: ChatFolder?) async throws -> ChatFolderInfo {
+        try await client.editChatFolder(chatFolderId: chatFolderId, folder: folder)
+    }
+
+    func deleteChatFolder(chatFolderId: Int?, leaveChatIds: [Int64]?) async throws -> Ok {
+        try await client.deleteChatFolder(chatFolderId: chatFolderId, leaveChatIds: leaveChatIds)
+    }
+
+    func getChatFolderChatsToLeave(chatFolderId: Int?) async throws -> Chats {
+        try await client.getChatFolderChatsToLeave(chatFolderId: chatFolderId)
+    }
+
+    func getChatFolderChatCount(folder: ChatFolder?) async throws -> Count {
+        try await client.getChatFolderChatCount(folder: folder)
+    }
+
+    func reorderChatFolders(chatFolderIds: [Int]?, mainChatListPosition: Int?) async throws -> Ok {
+        try await client.reorderChatFolders(chatFolderIds: chatFolderIds, mainChatListPosition: mainChatListPosition)
+    }
+
+    func toggleChatFolderTags(areTagsEnabled: Bool?) async throws -> Ok {
+        try await client.toggleChatFolderTags(areTagsEnabled: areTagsEnabled)
+    }
+
+    func getRecommendedChatFolders() async throws -> RecommendedChatFolders {
+        try await client.getRecommendedChatFolders()
+    }
+
+    func getChatFolderDefaultIconName(folder: ChatFolder?) async throws -> ChatFolderIcon {
+        try await client.getChatFolderDefaultIconName(folder: folder)
+    }
+
     func getChatScheduledMessages(chatId: Int64?) async throws -> Messages {
         try await client.getChatScheduledMessages(chatId: chatId)
     }
@@ -798,6 +1097,10 @@ extension TelegramSession: TelegramService {
         try await client.getChats(chatList: chatList, limit: limit)
     }
 
+    func loadChats(chatList: ChatList?, limit: Int?) async throws -> Ok {
+        try await client.loadChats(chatList: chatList, limit: limit)
+    }
+
     func getAuthorizationState() async throws -> AuthorizationState {
         try await client.getAuthorizationState()
     }
@@ -816,6 +1119,22 @@ extension TelegramSession: TelegramService {
 
     func getInstalledStickerSets(stickerType: StickerType?) async throws -> StickerSets {
         try await client.getInstalledStickerSets(stickerType: stickerType)
+    }
+
+    func getEmojiCategories(type: EmojiCategoryType?) async throws -> EmojiCategories {
+        try await client.getEmojiCategories(type: type)
+    }
+
+    func getPremiumStickers(limit: Int?) async throws -> Stickers {
+        try await client.getPremiumStickers(limit: limit)
+    }
+
+    func getTrendingStickerSets(
+        limit: Int?,
+        offset: Int?,
+        stickerType: StickerType?,
+    ) async throws -> TrendingStickerSets {
+        try await client.getTrendingStickerSets(limit: limit, offset: offset, stickerType: stickerType)
     }
 
     func getMessage(chatId: Int64?, messageId: Int64?) async throws -> Message {
@@ -838,12 +1157,36 @@ extension TelegramSession: TelegramService {
         try await client.getRecentStickers(isAttached: isAttached)
     }
 
+    func removeRecentSticker(isAttached: Bool?, sticker: InputFile?) async throws -> Ok {
+        try await client.removeRecentSticker(isAttached: isAttached, sticker: sticker)
+    }
+
+    func clearRecentStickers(isAttached: Bool?) async throws -> Ok {
+        try await client.clearRecentStickers(isAttached: isAttached)
+    }
+
+    func getFavoriteStickers() async throws -> Stickers {
+        try await client.getFavoriteStickers()
+    }
+
+    func addFavoriteSticker(sticker: InputFile?) async throws -> Ok {
+        try await client.addFavoriteSticker(sticker: sticker)
+    }
+
+    func removeFavoriteSticker(sticker: InputFile?) async throws -> Ok {
+        try await client.removeFavoriteSticker(sticker: sticker)
+    }
+
     func getActiveSessions() async throws -> Sessions {
         try await client.getActiveSessions()
     }
 
     func terminateSession(sessionId: TdInt64?) async throws -> Ok {
         try await client.terminateSession(sessionId: sessionId)
+    }
+
+    func confirmSession(sessionId: TdInt64?) async throws -> Ok {
+        try await client.confirmSession(sessionId: sessionId)
     }
 
     func terminateAllOtherSessions() async throws -> Ok {
@@ -869,6 +1212,84 @@ extension TelegramSession: TelegramService {
             limit: limit,
             query: query,
             stickerType: stickerType,
+        )
+    }
+
+    func searchStickers(
+        emojis: String?,
+        inputLanguageCodes: [String]?,
+        limit: Int?,
+        offset: Int?,
+        query: String?,
+        stickerType: StickerType?,
+    ) async throws -> Stickers {
+        try await client.searchStickers(
+            emojis: emojis,
+            inputLanguageCodes: inputLanguageCodes,
+            limit: limit,
+            offset: offset,
+            query: query,
+            stickerType: stickerType,
+        )
+    }
+
+    func searchInstalledStickerSets(
+        limit: Int?,
+        query: String?,
+        stickerType: StickerType?,
+    ) async throws -> StickerSets {
+        try await client.searchInstalledStickerSets(limit: limit, query: query, stickerType: stickerType)
+    }
+
+    func searchEmojis(inputLanguageCodes: [String]?, text: String?) async throws -> EmojiKeywords {
+        try await client.searchEmojis(inputLanguageCodes: inputLanguageCodes, text: text)
+    }
+
+    func getSavedAnimations() async throws -> Animations {
+        try await client.getSavedAnimations()
+    }
+
+    func addSavedAnimation(animation: InputFile?) async throws -> Ok {
+        try await client.addSavedAnimation(animation: animation)
+    }
+
+    func removeSavedAnimation(animation: InputFile?) async throws -> Ok {
+        try await client.removeSavedAnimation(animation: animation)
+    }
+
+    func getInlineQueryResults(
+        botUserId: Int64?,
+        chatId: Int64?,
+        offset: String?,
+        query: String?,
+        userLocation: Location?,
+    ) async throws -> InlineQueryResults {
+        try await client.getInlineQueryResults(
+            botUserId: botUserId,
+            chatId: chatId,
+            offset: offset,
+            query: query,
+            userLocation: userLocation,
+        )
+    }
+
+    func sendInlineQueryResultMessage(
+        chatId: Int64?,
+        hideViaBot: Bool?,
+        options: MessageSendOptions?,
+        queryId: TdInt64?,
+        replyTo: InputMessageReplyTo?,
+        resultId: String?,
+        topicId: MessageTopic?,
+    ) async throws -> Message {
+        try await client.sendInlineQueryResultMessage(
+            chatId: chatId,
+            hideViaBot: hideViaBot,
+            options: options,
+            queryId: queryId,
+            replyTo: replyTo,
+            resultId: resultId,
+            topicId: topicId,
         )
     }
 
@@ -908,8 +1329,26 @@ extension TelegramSession: TelegramService {
         try await client.addStickerToSet(name: name, sticker: sticker, userId: userId)
     }
 
+    func replaceStickerInSet(
+        name: String?,
+        newSticker: NewSticker?,
+        oldSticker: InputFile?,
+        userId: Int64?,
+    ) async throws -> Ok {
+        try await client.replaceStickerInSet(
+            name: name,
+            newSticker: newSticker,
+            oldSticker: oldSticker,
+            userId: userId,
+        )
+    }
+
     func changeStickerSet(isArchived: Bool?, isInstalled: Bool?, setId: TdInt64?) async throws -> Ok {
         try await client.changeStickerSet(isArchived: isArchived, isInstalled: isInstalled, setId: setId)
+    }
+
+    func viewTrendingStickerSets(stickerSetIds: [TdInt64]?) async throws -> Ok {
+        try await client.viewTrendingStickerSets(stickerSetIds: stickerSetIds)
     }
 
     func getBlockedMessageSenders(blockList: BlockList?, limit: Int?, offset: Int?) async throws -> MessageSenders {
@@ -922,6 +1361,10 @@ extension TelegramSession: TelegramService {
 
     func getMe() async throws -> User {
         try await client.getMe()
+    }
+
+    func getMessageEffect(effectId: TdInt64?) async throws -> MessageEffect {
+        try await client.getMessageEffect(effectId: effectId)
     }
 
     func getScopeNotificationSettings(scope: NotificationSettingsScope?) async throws -> ScopeNotificationSettings {
@@ -974,6 +1417,10 @@ extension TelegramSession: TelegramService {
 
     func leaveChat(chatId: Int64?) async throws -> Ok {
         try await client.leaveChat(chatId: chatId)
+    }
+
+    func joinChat(chatId: Int64?) async throws -> ChatJoinResult {
+        try await client.joinChat(chatId: chatId)
     }
 
     func openChat(chatId: Int64?) async throws -> Ok {
@@ -1042,6 +1489,117 @@ extension TelegramSession: TelegramService {
         )
     }
 
+    func getMessageThread(chatId: Int64?, messageId: Int64?) async throws -> MessageThreadInfo {
+        try await client.getMessageThread(chatId: chatId, messageId: messageId)
+    }
+
+    func getMessageThreadHistory(
+        chatId: Int64?,
+        fromMessageId: Int64?,
+        limit: Int?,
+        messageId: Int64?,
+        offset: Int?,
+    ) async throws -> Messages {
+        try await client.getMessageThreadHistory(
+            chatId: chatId,
+            fromMessageId: fromMessageId,
+            limit: limit,
+            messageId: messageId,
+            offset: offset,
+        )
+    }
+
+    func getForumTopics(
+        chatId: Int64?,
+        limit: Int?,
+        offsetDate: Int?,
+        offsetForumTopicId: Int?,
+        offsetMessageId: Int64?,
+        query: String?,
+    ) async throws -> ForumTopics {
+        try await client.getForumTopics(
+            chatId: chatId,
+            limit: limit,
+            offsetDate: offsetDate,
+            offsetForumTopicId: offsetForumTopicId,
+            offsetMessageId: offsetMessageId,
+            query: query,
+        )
+    }
+
+    func getForumTopic(chatId: Int64?, forumTopicId: Int?) async throws -> ForumTopic {
+        try await client.getForumTopic(chatId: chatId, forumTopicId: forumTopicId)
+    }
+
+    func getForumTopicHistory(
+        chatId: Int64?,
+        forumTopicId: Int?,
+        fromMessageId: Int64?,
+        limit: Int?,
+        offset: Int?,
+    ) async throws -> Messages {
+        try await client.getForumTopicHistory(
+            chatId: chatId,
+            forumTopicId: forumTopicId,
+            fromMessageId: fromMessageId,
+            limit: limit,
+            offset: offset,
+        )
+    }
+
+    func createForumTopic(
+        chatId: Int64?,
+        icon: ForumTopicIcon?,
+        isNameImplicit: Bool?,
+        name: String?,
+    ) async throws -> ForumTopicInfo {
+        try await client.createForumTopic(chatId: chatId, icon: icon, isNameImplicit: isNameImplicit, name: name)
+    }
+
+    func editForumTopic(
+        chatId: Int64?,
+        editIconCustomEmoji: Bool?,
+        forumTopicId: Int?,
+        iconCustomEmojiId: TdInt64?,
+        name: String?,
+    ) async throws -> Ok {
+        try await client.editForumTopic(
+            chatId: chatId,
+            editIconCustomEmoji: editIconCustomEmoji,
+            forumTopicId: forumTopicId,
+            iconCustomEmojiId: iconCustomEmojiId,
+            name: name,
+        )
+    }
+
+    func deleteForumTopic(chatId: Int64?, forumTopicId: Int?) async throws -> Ok {
+        try await client.deleteForumTopic(chatId: chatId, forumTopicId: forumTopicId)
+    }
+
+    func toggleForumTopicIsClosed(chatId: Int64?, forumTopicId: Int?, isClosed: Bool?) async throws -> Ok {
+        try await client.toggleForumTopicIsClosed(chatId: chatId, forumTopicId: forumTopicId, isClosed: isClosed)
+    }
+
+    func toggleForumTopicIsPinned(chatId: Int64?, forumTopicId: Int?, isPinned: Bool?) async throws -> Ok {
+        try await client.toggleForumTopicIsPinned(chatId: chatId, forumTopicId: forumTopicId, isPinned: isPinned)
+    }
+
+    func setForumTopicNotificationSettings(
+        chatId: Int64?,
+        forumTopicId: Int?,
+        notificationSettings: ChatNotificationSettings?,
+    ) async throws -> Ok {
+        try await client.setForumTopicNotificationSettings(
+            chatId: chatId,
+            forumTopicId: forumTopicId,
+            notificationSettings: notificationSettings,
+        )
+    }
+
+    func getForumTopicDefaultIcons() async throws -> Stickers {
+        try await client.getForumTopicDefaultIcons()
+    }
+
     func setChatNotificationSettings(
         chatId: Int64?,
         notificationSettings: ChatNotificationSettings?,
@@ -1062,6 +1620,50 @@ extension TelegramSession: TelegramService {
 
     func setUserPrivacySettingRules(rules: UserPrivacySettingRules?, setting: UserPrivacySetting?) async throws -> Ok {
         try await client.setUserPrivacySettingRules(rules: rules, setting: setting)
+    }
+
+    func getConnectedWebsites() async throws -> ConnectedWebsites {
+        try await client.getConnectedWebsites()
+    }
+
+    func disconnectWebsite(websiteId: TdInt64?) async throws -> Ok {
+        try await client.disconnectWebsite(websiteId: websiteId)
+    }
+
+    func disconnectAllWebsites() async throws -> Ok {
+        try await client.disconnectAllWebsites()
+    }
+
+    func getAccountTtl() async throws -> AccountTtl {
+        try await client.getAccountTtl()
+    }
+
+    func setAccountTtl(ttl: AccountTtl?) async throws -> Ok {
+        try await client.setAccountTtl(ttl: ttl)
+    }
+
+    func getArchiveChatListSettings() async throws -> ArchiveChatListSettings {
+        try await client.getArchiveChatListSettings()
+    }
+
+    func setArchiveChatListSettings(settings: ArchiveChatListSettings?) async throws -> Ok {
+        try await client.setArchiveChatListSettings(settings: settings)
+    }
+
+    func getLoginPasskeys() async throws -> Passkeys {
+        try await client.getLoginPasskeys()
+    }
+
+    func removeLoginPasskey(passkeyId: String?) async throws -> Ok {
+        try await client.removeLoginPasskey(passkeyId: passkeyId)
+    }
+
+    func getNewChatPrivacySettings() async throws -> NewChatPrivacySettings {
+        try await client.getNewChatPrivacySettings()
+    }
+
+    func setNewChatPrivacySettings(settings: NewChatPrivacySettings?) async throws -> Ok {
+        try await client.setNewChatPrivacySettings(settings: settings)
     }
 
     func setScopeNotificationSettings(
@@ -1099,6 +1701,10 @@ extension TelegramSession: TelegramService {
         try await client.getPasswordState()
     }
 
+    func getRecoveryEmailAddress(password: String?) async throws -> RecoveryEmailAddress {
+        try await client.getRecoveryEmailAddress(password: password)
+    }
+
     func setPassword(
         newHint: String?,
         newPassword: String?,
@@ -1113,6 +1719,18 @@ extension TelegramSession: TelegramService {
             oldPassword: oldPassword,
             setRecoveryEmailAddress: setRecoveryEmailAddress,
         )
+    }
+
+    func checkRecoveryEmailAddressCode(code: String?) async throws -> PasswordState {
+        try await client.checkRecoveryEmailAddressCode(code: code)
+    }
+
+    func resendRecoveryEmailAddressCode() async throws -> PasswordState {
+        try await client.resendRecoveryEmailAddressCode()
+    }
+
+    func cancelRecoveryEmailAddressVerification() async throws -> PasswordState {
+        try await client.cancelRecoveryEmailAddressVerification()
     }
 
     func addProxy(comment: String?, enable: Bool?, proxy: Proxy?) async throws -> AddedProxy {
@@ -1141,6 +1759,34 @@ extension TelegramSession: TelegramService {
 
     func pingProxy(proxy: Proxy?) async throws -> Seconds {
         try await client.pingProxy(proxy: proxy)
+    }
+
+    func getInternalLinkType(link: String?) async throws -> InternalLinkType {
+        try await client.getInternalLinkType(link: link)
+    }
+
+    func getMessageLinkInfo(url: String?) async throws -> MessageLinkInfo {
+        try await client.getMessageLinkInfo(url: url)
+    }
+
+    func searchPublicChat(username: String?) async throws -> Chat {
+        try await client.searchPublicChat(username: username)
+    }
+
+    func checkChatInviteLink(inviteLink: String?) async throws -> ChatInviteLinkInfo {
+        try await client.checkChatInviteLink(inviteLink: inviteLink)
+    }
+
+    func joinChatByInviteLink(inviteLink: String?) async throws -> ChatJoinResult {
+        try await client.joinChatByInviteLink(inviteLink: inviteLink)
+    }
+
+    func searchUserByPhoneNumber(onlyLocal: Bool?, phoneNumber: String?) async throws -> User {
+        try await client.searchUserByPhoneNumber(onlyLocal: onlyLocal, phoneNumber: phoneNumber)
+    }
+
+    func sendBotStartMessage(botUserId: Int64?, chatId: Int64?, parameter: String?) async throws -> Message {
+        try await client.sendBotStartMessage(botUserId: botUserId, chatId: chatId, parameter: parameter)
     }
 
     func setName(firstName: String?, lastName: String?) async throws -> Ok {
