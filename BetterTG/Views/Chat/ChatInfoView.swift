@@ -384,7 +384,6 @@ struct ChatInfoView: View {
             ServiceSoundManager.shared.stopOutgoingCallTone()
             callPhase = .ending
         case .callStateDiscarded:
-            ServiceSoundManager.shared.stopOutgoingCallTone(deactivateAudioSession: false)
             ServiceSoundManager.shared.playCallEndedSound()
             callPhase = .ended
             finishCallPresentation()

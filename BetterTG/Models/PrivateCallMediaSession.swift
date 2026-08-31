@@ -74,11 +74,13 @@ final class PrivateCallMediaSession: @unchecked Sendable {
             return nil
         }
 
-        OngoingCallThreadLocalContextWebrtc.applyServerConfig(ready.config)
         OngoingCallThreadLocalContextWebrtc.setupAudioSession()
-        configureAudioSession()
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .allowBluetoothA2DP, .mixWithOthers])
+        try? audio.setActive(true)
 
-        let connections = Self.makeConnections(ready.servers)
+        OngoingCallThreadLocalContextWebrtc.applyServerConfig(ready.config)
+        let connections = Self.makeConnections(ready.servers, version: version)
         guard !connections.isEmpty else { return nil }
 
         let capturer: OngoingCallThreadLocalContextVideoCapturer?
@@ -343,19 +345,10 @@ final class PrivateCallMediaSession: @unchecked Sendable {
         handler?(isActive)
     }
 
-    private func configureAudioSession() {
-        let audio = AVAudioSession.sharedInstance()
-        try? audio.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.allowBluetoothHFP, .defaultToSpeaker, .mixWithOthers]
-        )
-        try? audio.setActive(true)
-        try? audio.overrideOutputAudioPort(.speaker)
-    }
-
-
-    private static func makeConnections(_ servers: [CallServer]) -> [OngoingCallConnectionDescriptionWebrtc] {
+    private static func makeConnections(
+        _ servers: [CallServer],
+        version: String
+    ) -> [OngoingCallConnectionDescriptionWebrtc] {
         let telegramIds = servers.compactMap { server -> Int64? in
             if case .callServerTypeTelegramReflector = server.type { return server.id.rawValue }
             return nil
@@ -368,6 +361,13 @@ final class PrivateCallMediaSession: @unchecked Sendable {
             let endpoints = [server.ipAddress, server.ipv6Address].filter { !$0.isEmpty }
             switch server.type {
             case .callServerTypeTelegramReflector(let reflector):
+                // Telegram iOS reserves the TCP reflector for its separate
+                // signaling transport. TDLib already carries signaling for us,
+                // so feeding that endpoint to WebRTC prevents DTLS media from
+                // completing on current (non-12.0.0) implementations.
+                if reflector.isTcp, version != "12.0.0" {
+                    return []
+                }
                 guard let reflectorId = idMap[server.id.rawValue] else { return [] }
                 let password = reflector.peerTag.map { String(format: "%02x", $0) }.joined()
                 return endpoints.map {

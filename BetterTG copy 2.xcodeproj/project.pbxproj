@@ -1,0 +1,1178 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		18FA9AD33024B90A00AF40BC /* CodeScanner in Frameworks */ = {isa = PBXBuildFile; productRef = AED4C5E0195046E893F77F0B /* CodeScanner */; };
+		29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */ = {isa = PBXBuildFile; productRef = 69151C5FAB054AB894A93455 /* SwiftOGG */; };
+		A10000000000000000000001 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000000B /* TDLibKit */; };
+		B3000000000000000000000C /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
+		C40000000000000000000001 /* SwiftOGG in Frameworks */ = {isa = PBXBuildFile; productRef = 69151C5FAB054AB894A93455 /* SwiftOGG */; };
+		D10000000000000000000001 /* RLottieKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000005 /* RLottieKit */; };
+		D10000000000000000000003 /* RLottieKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000005 /* RLottieKit */; };
+		D20000000000000000000001 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
+		D20000000000000000000003 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
+		DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
+		E30000000000000000000002 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */; };
+		E30000000000000000000003 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		E1000000000000000000000B /* BetterTGShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* BetterTGShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E10000000000000000000010 /* BetterTGShared/TelegramShareExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000000E /* BetterTGShared/TelegramShareExtension.swift */; };
+		E10000000000000000000011 /* BetterTGShared/TelegramAvatarColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000000F /* BetterTGShared/TelegramAvatarColor.swift */; };
+		E10000000000000000000013 /* BetterTGShared/AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* BetterTGShared/AttachmentStaging.swift */; };
+		F1000000000000000000000B /* BetterTGNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* BetterTGNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F1000000000000000000000F /* BetterTGShared/TelegramNotificationSoundManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000E /* BetterTGShared/TelegramNotificationSoundManifest.swift */; };
+		F10000000000000000000010 /* BetterTGShared/TelegramShareExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000000E /* BetterTGShared/TelegramShareExtension.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B3000000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF4B997628C3F3F50087C1B9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DF4B997D28C3F3F50087C1B9;
+			remoteInfo = BetterTG;
+		};
+		E1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF4B997628C3F3F50087C1B9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E10000000000000000000003;
+			remoteInfo = BetterTGShare;
+		};
+		F1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF4B997628C3F3F50087C1B9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F10000000000000000000003;
+			remoteInfo = BetterTGNotificationService;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DF63538429B68F180054F0A0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				E1000000000000000000000B /* BetterTGShare.appex in Embed Foundation Extensions */,
+				F1000000000000000000000B /* BetterTGNotificationService.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFBB1D92290D6B8400CE7BB5 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFE2618629196FB300267815 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				E30000000000000000000003 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000002 /* BetterTGMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterTGMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000001 /* BetterTGTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BetterTGTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DF4B997E28C3F3F50087C1B9 /* BetterTG.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterTG.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework; sourceTree = SOURCE_ROOT; };
+		E10000000000000000000001 /* BetterTGShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterTGShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E1000000000000000000000E /* BetterTGShared/TelegramShareExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/TelegramShareExtension.swift; sourceTree = "<group>"; };
+		E1000000000000000000000F /* BetterTGShared/TelegramAvatarColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/TelegramAvatarColor.swift; sourceTree = "<group>"; };
+		E10000000000000000000012 /* BetterTGShared/AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/AttachmentStaging.swift; sourceTree = "<group>"; };
+		F10000000000000000000001 /* BetterTGNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterTGNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1000000000000000000000E /* BetterTGShared/TelegramNotificationSoundManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/TelegramNotificationSoundManifest.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DFD75B772D3DA0D8004E7CA6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"BetterTGApp 2.swift",
+				Info.plist,
+				"MainView 2.swift",
+				"Models/ConfirmChatDelete 2.swift",
+				"Models/CustomMessageAlbum 2.swift",
+				"Models/LoginState 2.swift",
+				"Models/Media 2.swift",
+				"Models/OpenedItem 2.swift",
+				"Models/PermissionsManager 2.swift",
+				"Models/ReplyMessageType 2.swift",
+				"Models/SelectedImage 2.swift",
+				"Models/ServiceSoundManager 2.swift",
+				"PreferenceKeys/SizePreferenceKey 2.swift",
+				"Utils/Image 2.swift",
+				"Utils/Logger 2.swift",
+				"Utils/MockData 2.swift",
+				"Utils/TDLib 2.swift",
+				"Utils/Text 2.swift",
+				"Utils/Utils 2.swift",
+				"Views/Chat/ChatInfoDetailViews 2.swift",
+				"Views/Chat/ChatInfoView 2.swift",
+				"Views/Chat/ChatView 2.swift",
+				"Views/Chat/ChatViewAlbum 2.swift",
+				"Views/Chat/SharedMediaView 2.swift",
+				"Views/ChatsList/FolderView 2.swift",
+				"Views/ChatsList/LastOrDraftMessageView 2.swift",
+				"Views/Common/CameraView 2.swift",
+				"Views/Common/LazyView 2.swift",
+				"Views/Common/MediaAlbum 2.swift",
+				"Views/Common/MessageTextEditor 2.swift",
+				"Views/Common/PhotoPicker 2.swift",
+				"Views/Common/ProfileImageView 2.swift",
+				"Views/Common/ReplyMessageView 2.swift",
+				"Views/Common/ZoomableContainer 2.swift",
+				"Views/Login/SelectCountryView 2.swift",
+				"Views/Message/ForwardChatPickerView 2.swift",
+				"Views/Message/ForwardedFromView 2.swift",
+				"Views/Message/MessageAudioView 2.swift",
+				"Views/Message/MessageContentView 2.swift",
+				"Views/Message/MessageDocumentView 2.swift",
+				"Views/Message/MessageTextView 2.swift",
+				"Views/Message/MessageView 2.swift",
+				"Views/Message/MessageView+ContextMenu 2.swift",
+				"Views/Message/MessageVoiceNoteView 2.swift",
+			);
+			target = DF4B997D28C3F3F50087C1B9 /* BetterTG */;
+		};
+		E1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E10000000000000000000003 /* BetterTGShare */;
+		};
+		F1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F10000000000000000000003 /* BetterTGNotificationService */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000003 /* BetterTGMac */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGMac; sourceTree = "<group>"; };
+		A20000000000000000000001 /* BetterTGShared */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGShared; sourceTree = "<group>"; };
+		A20000000000000000000002 /* BetterTG/Secret */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTG/Secret; sourceTree = "<group>"; };
+		B30000000000000000000002 /* BetterTGTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BetterTGTests; sourceTree = "<group>"; };
+		DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (DFD75B772D3DA0D8004E7CA6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTG; sourceTree = "<group>"; };
+		E10000000000000000000002 /* BetterTGShare */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (E1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTGShare; sourceTree = "<group>"; };
+		F10000000000000000000002 /* BetterTGNotificationService */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (F1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTGNotificationService; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* TDLibKit in Frameworks */,
+				C40000000000000000000001 /* SwiftOGG in Frameworks */,
+				D10000000000000000000001 /* RLottieKit in Frameworks */,
+				D20000000000000000000001 /* TelegramWebM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3000000000000000000000C /* TDLibKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF4B997B28C3F3F50087C1B9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E30000000000000000000002 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Frameworks */,
+				18FA9AD33024B90A00AF40BC /* CodeScanner in Frameworks */,
+				DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */,
+				29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */,
+				D10000000000000000000003 /* RLottieKit in Frameworks */,
+				D20000000000000000000003 /* TelegramWebM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		DF4B997528C3F3F50087C1B9 = {
+			isa = PBXGroup;
+			children = (
+				E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */,
+				DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */,
+				A10000000000000000000003 /* BetterTGMac */,
+				E10000000000000000000002 /* BetterTGShare */,
+				F10000000000000000000002 /* BetterTGNotificationService */,
+				A20000000000000000000001 /* BetterTGShared */,
+				A20000000000000000000002 /* BetterTG/Secret */,
+				B30000000000000000000002 /* BetterTGTests */,
+				E1000000000000000000000E /* BetterTGShared/TelegramShareExtension.swift */,
+				E1000000000000000000000F /* BetterTGShared/TelegramAvatarColor.swift */,
+				E10000000000000000000012 /* BetterTGShared/AttachmentStaging.swift */,
+				F1000000000000000000000E /* BetterTGShared/TelegramNotificationSoundManifest.swift */,
+				DF4B997F28C3F3F50087C1B9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DF4B997F28C3F3F50087C1B9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DF4B997E28C3F3F50087C1B9 /* BetterTG.app */,
+				A10000000000000000000002 /* BetterTGMac.app */,
+				E10000000000000000000001 /* BetterTGShare.appex */,
+				F10000000000000000000001 /* BetterTGNotificationService.appex */,
+				B30000000000000000000001 /* BetterTGTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000005 /* BetterTGMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000A /* Build configuration list for PBXNativeTarget "BetterTGMac" */;
+			buildPhases = (
+				A10000000000000000000006 /* Sources */,
+				A10000000000000000000004 /* Frameworks */,
+				A10000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* BetterTGMac */,
+				A20000000000000000000001 /* BetterTGShared */,
+				A20000000000000000000002 /* BetterTG/Secret */,
+			);
+			name = BetterTGMac;
+			packageProductDependencies = (
+				A1000000000000000000000B /* TDLibKit */,
+				69151C5FAB054AB894A93455 /* SwiftOGG */,
+				D10000000000000000000005 /* RLottieKit */,
+				D20000000000000000000005 /* TelegramWebM */,
+			);
+			productName = BetterTGMac;
+			productReference = A10000000000000000000002 /* BetterTGMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B30000000000000000000003 /* BetterTGTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B30000000000000000000009 /* Build configuration list for PBXNativeTarget "BetterTGTests" */;
+			buildPhases = (
+				B30000000000000000000004 /* Sources */,
+				B30000000000000000000005 /* Frameworks */,
+				B30000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B3000000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B30000000000000000000002 /* BetterTGTests */,
+			);
+			name = BetterTGTests;
+			packageProductDependencies = (
+				DF9C5CC0292698BC00ED1CA8 /* TDLibKit */,
+			);
+			productName = BetterTGTests;
+			productReference = B30000000000000000000001 /* BetterTGTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DF4B997D28C3F3F50087C1B9 /* BetterTG */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DF4B998C28C3F3F60087C1B9 /* Build configuration list for PBXNativeTarget "BetterTG" */;
+			buildPhases = (
+				DF4B997A28C3F3F50087C1B9 /* Sources */,
+				DFB18A412F0D3A9A00A1B2C3 /* SwiftFormat */,
+				DF4B997B28C3F3F50087C1B9 /* Frameworks */,
+				DF4B997C28C3F3F50087C1B9 /* Resources */,
+				DFBB1D92290D6B8400CE7BB5 /* Embed Watch Content */,
+				DFE2618629196FB300267815 /* Embed Frameworks */,
+				DF63538429B68F180054F0A0 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E1000000000000000000000D /* PBXTargetDependency */,
+				F1000000000000000000000D /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A20000000000000000000001 /* BetterTGShared */,
+				DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */,
+			);
+			name = BetterTG;
+			packageProductDependencies = (
+				DF9C5CC0292698BC00ED1CA8 /* TDLibKit */,
+				69151C5FAB054AB894A93455 /* SwiftOGG */,
+				D10000000000000000000005 /* RLottieKit */,
+				D20000000000000000000005 /* TelegramWebM */,
+				AED4C5E0195046E893F77F0B /* CodeScanner */,
+			);
+			productName = BetterTG;
+			productReference = DF4B997E28C3F3F50087C1B9 /* BetterTG.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E10000000000000000000003 /* BetterTGShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGShare" */;
+			buildPhases = (
+				E10000000000000000000004 /* Sources */,
+				E10000000000000000000005 /* Frameworks */,
+				E10000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E10000000000000000000002 /* BetterTGShare */,
+			);
+			name = BetterTGShare;
+			productName = BetterTGShare;
+			productReference = E10000000000000000000001 /* BetterTGShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F10000000000000000000003 /* BetterTGNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGNotificationService" */;
+			buildPhases = (
+				F10000000000000000000004 /* Sources */,
+				F10000000000000000000005 /* Frameworks */,
+				F10000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F10000000000000000000002 /* BetterTGNotificationService */,
+			);
+			name = BetterTGNotificationService;
+			productName = BetterTGNotificationService;
+			productReference = F10000000000000000000001 /* BetterTGNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DF4B997628C3F3F50087C1B9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1430;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					A10000000000000000000005 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					B30000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = DF4B997D28C3F3F50087C1B9;
+					};
+					DF4B997D28C3F3F50087C1B9 = {
+						CreatedOnToolsVersion = 14.0;
+					};
+					E10000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					F10000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = DF4B997928C3F3F50087C1B9 /* Build configuration list for PBXProject "BetterTG" */;
+			compatibilityVersion = "Xcode 13.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = DF4B997528C3F3F50087C1B9;
+			packageReferences = (
+				DF820B6E28D787AD007DD293 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+				DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */,
+				A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */,
+				D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */,
+				D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */,
+				18FA93183024B5DB00AF40BC /* XCRemoteSwiftPackageReference "CodeScanner" */,
+			);
+			productRefGroup = DF4B997F28C3F3F50087C1B9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DF4B997D28C3F3F50087C1B9 /* BetterTG */,
+				A10000000000000000000005 /* BetterTGMac */,
+				B30000000000000000000003 /* BetterTGTests */,
+				E10000000000000000000003 /* BetterTGShare */,
+				F10000000000000000000003 /* BetterTGNotificationService */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF4B997C28C3F3F50087C1B9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DFB18A412F0D3A9A00A1B2C3 /* SwiftFormat */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = SwiftFormat;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -x /opt/homebrew/bin/swiftformat ]; then\n  /opt/homebrew/bin/swiftformat \"$SRCROOT\" --config \"$SRCROOT/.swiftformat\" --lint --lenient\nelse\n  echo \"warning: SwiftFormat not installed. Install from https://github.com/nicklockwood/SwiftFormat (Homebrew: brew install swiftformat)\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF4B997A28C3F3F50087C1B9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000010 /* BetterTGShared/TelegramShareExtension.swift in Sources */,
+				E10000000000000000000011 /* BetterTGShared/TelegramAvatarColor.swift in Sources */,
+				E10000000000000000000013 /* BetterTGShared/AttachmentStaging.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F10000000000000000000010 /* BetterTGShared/TelegramShareExtension.swift in Sources */,
+				F1000000000000000000000F /* BetterTGShared/TelegramNotificationSoundManifest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B3000000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DF4B997D28C3F3F50087C1B9 /* BetterTG */;
+			targetProxy = B3000000000000000000000A /* PBXContainerItemProxy */;
+		};
+		E1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E10000000000000000000003 /* BetterTGShare */;
+			targetProxy = E1000000000000000000000C /* PBXContainerItemProxy */;
+		};
+		F1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F10000000000000000000003 /* BetterTGNotificationService */;
+			targetProxy = F1000000000000000000000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				CODE_SIGN_ENTITLEMENTS = BetterTGMac/BetterTGMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone to record and send voice messages.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTGMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+			};
+			name = Debug;
+		};
+		A10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = production;
+				CODE_SIGN_ENTITLEMENTS = BetterTGMac/BetterTGMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone to record and send voice messages.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTGMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+			};
+			name = Release;
+		};
+		B30000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTGTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BetterTG.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BetterTG";
+			};
+			name = Debug;
+		};
+		B30000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTGTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BetterTG.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BetterTG";
+			};
+			name = Release;
+		};
+		DF4B998A28C3F3F60087C1B9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
+			};
+			name = Debug;
+		};
+		DF4B998B28C3F3F60087C1B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
+			};
+			name = Release;
+		};
+		DF4B998D28C3F3F60087C1B9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BetterTG/BetterTG.entitlements;
+				ENABLE_DEBUG_DYLIB = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/BetterTG/Vendor",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTG/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats and scan QR codes to link a device.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "SwiftTG can use Face ID to quickly unlock the app instead of typing your passcode.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We would like to access your Microphone to let you send Voice messages in chats.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				OTHER_LDFLAGS = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_USE_INTEGRATED_DRIVER = NO;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		DF4B998E28C3F3F60087C1B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = production;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BetterTG/BetterTG.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/BetterTG/Vendor",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTG/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We would like to access your Camera to let you send photos in chats and scan QR codes to link a device.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "SwiftTG can use Face ID to quickly unlock the app instead of typing your passcode.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We would like to access your Microphone to let you send Voice messages in chats.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				OTHER_LDFLAGS = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_USE_INTEGRATED_DRIVER = NO;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		E10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGShare/BetterTGShare.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG.Share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		E10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGShare/BetterTGShare.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG.Share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		F10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGNotificationService/BetterTGNotificationService.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG.NotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		F10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGNotificationService/BetterTGNotificationService.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 949DJWKGYX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mihaipascu.BetterTG.NotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000A /* Build configuration list for PBXNativeTarget "BetterTGMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000008 /* Debug */,
+				A10000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B30000000000000000000009 /* Build configuration list for PBXNativeTarget "BetterTGTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B30000000000000000000007 /* Debug */,
+				B30000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DF4B997928C3F3F50087C1B9 /* Build configuration list for PBXProject "BetterTG" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DF4B998A28C3F3F60087C1B9 /* Debug */,
+				DF4B998B28C3F3F60087C1B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DF4B998C28C3F3F60087C1B9 /* Build configuration list for PBXNativeTarget "BetterTG" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DF4B998D28C3F3F60087C1B9 /* Debug */,
+				DF4B998E28C3F3F60087C1B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000008 /* Debug */,
+				E10000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGNotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000008 /* Debug */,
+				F10000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/RLottieKit;
+		};
+		D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/TelegramFFmpeg;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		18FA93183024B5DB00AF40BC /* XCRemoteSwiftPackageReference "CodeScanner" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/twostraws/CodeScanner";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.2;
+			};
+		};
+		A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/element-hq/swift-ogg";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.4;
+			};
+		};
+		DF820B6E28D787AD007DD293 /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-argument-parser.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Swiftgram/TDLibKit";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		69151C5FAB054AB894A93455 /* SwiftOGG */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */;
+			productName = SwiftOGG;
+		};
+		A1000000000000000000000B /* TDLibKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */;
+			productName = TDLibKit;
+		};
+		AED4C5E0195046E893F77F0B /* CodeScanner */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 18FA93183024B5DB00AF40BC /* XCRemoteSwiftPackageReference "CodeScanner" */;
+			productName = CodeScanner;
+		};
+		D10000000000000000000005 /* RLottieKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */;
+			productName = RLottieKit;
+		};
+		D20000000000000000000005 /* TelegramWebM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */;
+			productName = TelegramWebM;
+		};
+		DF9C5CC0292698BC00ED1CA8 /* TDLibKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DF9C5CBF292698BC00ED1CA8 /* XCRemoteSwiftPackageReference "TDLibKit" */;
+			productName = TDLibKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = DF4B997628C3F3F50087C1B9 /* Project object */;
+}

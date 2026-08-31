@@ -45,35 +45,9 @@ import UIKit
     }
 
     func startOutgoingCallTone() {
-        guard callToneEngine == nil else { return }
-
-        let sampleRate = 44_100.0
-        let duration = 6.0
-        let audibleDuration = 2.0
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
-              let buffer = AVAudioPCMBuffer(
-                  pcmFormat: format,
-                  frameCapacity: AVAudioFrameCount(sampleRate * duration),
-              ),
-              let samples = buffer.floatChannelData?[0]
+        guard callTonePlayer == nil,
+              let player = makeCallSoundPlayer(named: "voip_ringback")
         else { return }
-
-        buffer.frameLength = buffer.frameCapacity
-        for frame in 0 ..< Int(buffer.frameLength) {
-            let time = Double(frame) / sampleRate
-            guard time < audibleDuration else {
-                samples[frame] = 0
-                continue
-            }
-            let edgeFade = min(1, min(time / 0.025, (audibleDuration - time) / 0.025))
-            let tone = sin(2 * .pi * 440 * time) + sin(2 * .pi * 480 * time)
-            samples[frame] = Float(tone * 0.10 * edgeFade)
-        }
-
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
 
         do {
             let session = AVAudioSession.sharedInstance()
@@ -84,23 +58,18 @@ import UIKit
             )
             try session.setActive(true)
             startOutgoingCallProximityMonitoring()
-            try engine.start()
-            player.scheduleBuffer(buffer, at: nil, options: .loops)
+            player.numberOfLoops = -1
             player.play()
-            callToneEngine = engine
             callTonePlayer = player
         } catch {
             stopOutgoingCallProximityMonitoring()
-            engine.stop()
         }
     }
 
     func stopOutgoingCallTone(deactivateAudioSession: Bool = true) {
         stopOutgoingCallProximityMonitoring()
         callTonePlayer?.stop()
-        callToneEngine?.stop()
         callTonePlayer = nil
-        callToneEngine = nil
         if deactivateAudioSession {
             let audio = AVAudioSession.sharedInstance()
             try? audio.overrideOutputAudioPort(.none)
@@ -112,8 +81,9 @@ import UIKit
 
     func startCallConnectingTone() {
         guard connectingCallPlayer == nil,
-              let player = makeCallSoundPlayer(named: "voip_connecting")
+              let player = makeCallSoundPlayer(named: "voip_connecting", preferredExtension: "wav")
         else { return }
+
         player.numberOfLoops = -1
         player.play()
         connectingCallPlayer = player
@@ -195,8 +165,7 @@ import UIKit
 
     private var incomingMessageSound: SystemSoundID = 0
     private var messageDeliveredSound: SystemSoundID = 0
-    private var callToneEngine: AVAudioEngine?
-    private var callTonePlayer: AVAudioPlayerNode?
+    private var callTonePlayer: AVAudioPlayer?
     private var connectingCallPlayer: AVAudioPlayer?
     private var callFeedbackPlayer: AVAudioPlayer?
     private var outgoingCallProximityObserver: NSObjectProtocol?
@@ -204,10 +173,18 @@ import UIKit
     private var incomingCallTonePlayer: AVAudioPlayerNode?
     private var policy = TelegramServiceSoundPolicy()
 
-    private func makeCallSoundPlayer(named name: String) -> AVAudioPlayer? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3"),
+    private func makeCallSoundPlayer(
+        named name: String,
+        preferredExtension: String = "mp3"
+    ) -> AVAudioPlayer? {
+        // These are Telegram's original assets. Decode them before playback;
+        // do not route them through WebRTC's voice-processing audio unit.
+        let fallbackExtension = preferredExtension == "wav" ? "mp3" : "wav"
+        guard let url = Bundle.main.url(forResource: name, withExtension: preferredExtension)
+                ?? Bundle.main.url(forResource: name, withExtension: fallbackExtension),
               let player = try? AVAudioPlayer(contentsOf: url)
         else { return nil }
+        player.volume = 1
         player.prepareToPlay()
         return player
     }
