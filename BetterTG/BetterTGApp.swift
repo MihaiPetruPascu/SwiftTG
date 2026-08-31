@@ -1,6 +1,7 @@
 // BetterTGApp.swift
 
 import AVKit
+import Intents
 import SwiftUI
 import TDLibKit
 import UserNotifications
@@ -49,6 +50,12 @@ import UserNotifications
                             RootVM.shared.handleDeepLink(url)
                         }
                     }
+                    .onContinueUserActivity(NSStringFromClass(INStartCallIntent.self)) { userActivity in
+                        _ = handleStartCallActivity(userActivity)
+                    }
+                    .onContinueUserActivity(legacyStartCallActivityType) { userActivity in
+                        _ = handleStartCallActivity(userActivity)
+                    }
             }
         }
         // Belt-and-suspenders for the share hand-off: `.authorizationStateReady` (RootVM's other
@@ -61,6 +68,8 @@ import UserNotifications
             switch newPhase {
             case .active:
                 TelegramAppLockController.shared.noteWillEnterForeground()
+                TelegramCallSession.shared.restoreCallViewFromPictureInPictureIfNeeded()
+                RootVM.shared.noteAppBecameActive()
                 Task { await RootVM.shared.processPendingShareRequests() }
             case .background:
                 TelegramAppLockController.shared.noteDidEnterBackground()
@@ -75,6 +84,40 @@ import UserNotifications
     // MARK: Private
 
     @Environment(\.scenePhase) private var scenePhase
+}
+
+// MARK: - Start-call Activity
+
+private let legacyStartCallActivityType = "INStartAudioCallIntent"
+
+@MainActor private func handleStartCallActivity(_ userActivity: NSUserActivity) -> Bool {
+    guard let intent = userActivity.interaction?.intent else {
+        log("[CallKit] received user activity type=\(userActivity.activityType) without an intent")
+        return false
+    }
+    let intentType = String(describing: type(of: intent))
+    log("[CallKit] received user activity type=\(userActivity.activityType) intent=\(intentType)")
+
+    let contacts: [INPerson]?
+    let isVideo: Bool
+    if let intent = intent as? INStartCallIntent {
+        contacts = intent.contacts
+        isVideo = intent.callCapability == .videoCall
+    } else if userActivity.activityType == legacyStartCallActivityType
+        || intentType == legacyStartCallActivityType
+    {
+        let contactsSelector = NSSelectorFromString("contacts")
+        guard intent.responds(to: contactsSelector) else {
+            log("[CallKit] legacy start-call intent does not expose contacts")
+            return false
+        }
+        contacts = intent.value(forKey: "contacts") as? [INPerson]
+        isVideo = false
+    } else {
+        log("[CallKit] unsupported start-call intent type=\(intentType)")
+        return false
+    }
+    return CallKitManager.shared.startOutgoingCall(from: contacts, isVideo: isVideo)
 }
 
 // MARK: - AppDelegate
@@ -92,6 +135,8 @@ import UserNotifications
         UNUserNotificationCenter.current().delegate = self
         Self.registerNotificationCategories()
         PushNotificationsManager.shared.start()
+        CallKitManager.shared.start()
+        VoipPushManager.shared.start()
         return true
     }
 
@@ -107,6 +152,13 @@ import UserNotifications
         didFailToRegisterForRemoteNotificationsWithError error: any Swift.Error,
     ) {
         PushNotificationsManager.shared.didFailToRegister(error: error)
+    }
+
+    func application(
+        _: UIApplication,
+        supportedInterfaceOrientationsFor _: UIWindow?,
+    ) -> UIInterfaceOrientationMask {
+        CallOrientationController.supportedOrientations
     }
 
     func application(
@@ -178,6 +230,14 @@ import UserNotifications
         return sceneConfig
     }
 
+    func application(
+        _: UIApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler _: @escaping ([any UIUserActivityRestoring]?) -> Void,
+    ) -> Bool {
+        handleStartCallActivity(userActivity)
+    }
+
     // MARK: Private
 
     /// The action identifier within each repliable category below - Telegram's own push payload
@@ -240,13 +300,20 @@ import UserNotifications
 
 // MARK: - SceneDelegate
 
-final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+@MainActor final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(
         _ scene: UIScene,
         willConnectTo _: UISceneSession,
-        options _: UIScene.ConnectionOptions,
+        options connectionOptions: UIScene.ConnectionOptions,
     ) {
         guard let scene = scene as? UIWindowScene else { return }
         Utils.screen = scene.screen
+        for userActivity in connectionOptions.userActivities where handleStartCallActivity(userActivity) {
+            break
+        }
+    }
+
+    func scene(_: UIScene, continue userActivity: NSUserActivity) {
+        _ = handleStartCallActivity(userActivity)
     }
 }

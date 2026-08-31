@@ -73,7 +73,9 @@ struct MacRootView: View {
                 .alert("Login Denied", isPresented: $model.showsDeniedSessionNotice) {
                     Button("OK") {}
                 } message: {
-                    Text("The session was terminated. If this wasn't you, consider changing your password in Two-Step Verification.")
+                    Text(
+                        "The session was terminated. If this wasn't you, consider changing your password in Two-Step Verification.",
+                    )
                 }
     }
 
@@ -173,6 +175,10 @@ private struct MacAuthorizationView: View {
                         confirmsPhoneNumber = !phoneNumber.wrappedValue.isEmpty
                     }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(TelegramPhoneNumber.normalized(
+                        callingCode: callingCode.wrappedValue,
+                        number: phoneNumber.wrappedValue,
+                    ) == nil)
                     if !isPreview {
                         Button("Quick log in using QR code") {
                             model.requestQrCodeLogin()
@@ -181,19 +187,36 @@ private struct MacAuthorizationView: View {
                         .foregroundStyle(.tint)
                     }
                 case .code:
-                    Text("Enter the code sent by Telegram.")
+                    Text(isPreview ? "Enter the code sent by Telegram." : model.loginCodeDeliveryDescription)
                     TextField("Login code", text: loginCode)
-                        .textContentType(.telephoneNumber)
+                        .textContentType(.oneTimeCode)
+                        .focused($loginCodeFocused)
                         .onSubmit { submitCode() }
                         .onChange(of: loginCode.wrappedValue) { _, code in
-                            if let expectedLoginCodeLength,
-                               code.count == expectedLoginCodeLength
-                            {
-                                submitCode()
-                            }
+                            guard isPreview || model.loginCodeIsNumeric,
+                                  let expectedLoginCodeLength,
+                                  code.count == expectedLoginCodeLength
+                            else { return }
+                            submitCode()
                         }
                     Button("Log In") { submitCode() }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(loginCode.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if !isPreview {
+                        Button {
+                            model.resendLoginCode()
+                        } label: {
+                            Text(model.codeResendCountdown > 0
+                                ? "\(model.loginCodeResendActionTitle) in \(model.loginCodeResendClock)"
+                                : model.loginCodeResendActionTitle)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        .disabled(model.codeResendCountdown > 0)
+                        Button("Change number") { model.changePhoneNumberForLogin() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                    }
                 case .password:
                     Text(passwordHint.isEmpty
                         ? "Enter your two-step verification password."
@@ -201,6 +224,23 @@ private struct MacAuthorizationView: View {
                     SecureField("Password", text: password)
                         .onSubmit { submitPassword() }
                     Button("Sign In") { submitPassword() }
+                        .keyboardShortcut(.defaultAction)
+                    if !isPreview {
+                        Button("Forgot Password?") { model.startPasswordRecovery() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                    }
+                case .passwordRecovery:
+                    Text(recoveryEmailPattern.isEmpty
+                        ? "Enter the code sent to your recovery email, then choose a new password."
+                        : "Enter the code sent to \(recoveryEmailPattern), then choose a new password.")
+                    TextField("Recovery code", text: $model.recoveryCode)
+                        .textContentType(.oneTimeCode)
+                    SecureField("New password", text: $model.newPassword)
+                        .textContentType(.newPassword)
+                        .onSubmit { model.submitPasswordRecovery() }
+                    TextField("New hint (optional)", text: $model.newPasswordHint)
+                    Button("Reset Password") { model.submitPasswordRecovery() }
                         .keyboardShortcut(.defaultAction)
                 case .emailAddress:
                     Text("Please enter your valid email address to protect your account.")
@@ -260,6 +300,9 @@ private struct MacAuthorizationView: View {
         }
         .frame(width: 360)
         .padding(40)
+        .onChange(of: step) { _, newStep in
+            loginCodeFocused = newStep == .code
+        }
         .sheet(isPresented: $showsCountryPicker) {
             MacCountryPicker(
                 selectedCountry: selectedCountry,
@@ -305,6 +348,25 @@ private struct MacAuthorizationView: View {
         } message: {
             Text(model.registrationTermsOfService?.text.text ?? "")
         }
+        .alert(
+            "Reset Account?",
+            isPresented: Binding(
+                get: { !isPreview && model.showsAccountResetConfirmation },
+                set: {
+                    if !$0 {
+                        model.showsAccountResetConfirmation = false
+                    }
+                },
+            ),
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Account", role: .destructive) { model.resetAccount() }
+        } message: {
+            Text(
+                "You have no recovery email set, so the password can't be restored. "
+                    + "Resetting deletes this account and all its messages. This can't be undone.",
+            )
+        }
     }
 
     // MARK: Private
@@ -314,10 +376,11 @@ private struct MacAuthorizationView: View {
         case phoneNumber
     }
 
-    private enum Step {
+    private enum Step: Hashable {
         case phoneNumber
         case code
         case password
+        case passwordRecovery
         case emailAddress
         case emailCode
         case registration
@@ -326,6 +389,7 @@ private struct MacAuthorizationView: View {
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedPhoneField: PhoneField?
+    @FocusState private var loginCodeFocused: Bool
     @State private var confirmsPhoneNumber = false
     @State private var previewCallingCode = AuthenticationPreviewData.countries[0].phoneNumberPrefix
     @State private var previewLoginCode = ""
@@ -402,6 +466,11 @@ private struct MacAuthorizationView: View {
         return details.passwordHint
     }
 
+    private var recoveryEmailPattern: String {
+        guard case .authorizationStateWaitPassword(let details) = model.authorizationState else { return "" }
+        return details.recoveryEmailAddressPattern
+    }
+
     private var phoneNumber: Binding<String> {
         Binding(
             get: { isPreview ? previewPhoneNumber : model.phoneNumber },
@@ -427,9 +496,9 @@ private struct MacAuthorizationView: View {
         case .authorizationStateWaitPhoneNumber:
             return .phoneNumber
         case .authorizationStateWaitCode:
-            return .code
+            return model.wantsToChangePhoneNumber ? .phoneNumber : .code
         case .authorizationStateWaitPassword:
-            return .password
+            return model.isRecoveringPassword ? .passwordRecovery : .password
         case .authorizationStateWaitEmailAddress:
             return .emailAddress
         case .authorizationStateWaitEmailCode:

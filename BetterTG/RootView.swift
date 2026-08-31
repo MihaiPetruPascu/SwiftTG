@@ -1,6 +1,7 @@
 // RootView.swift
 
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     // MARK: Internal
@@ -9,6 +10,9 @@ struct RootView: View {
         ZStack {
             if rootVM.loggedIn {
                 MainView()
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        TelegramCallBar()
+                    }
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         TelegramLiveLocationBar()
                     }
@@ -32,6 +36,14 @@ struct RootView: View {
                     }
                     .animation(.default, value: rootVM.inAppNotificationBanner)
                     .animation(.default, value: rootVM.unconfirmedSession)
+
+                if !hasCompletedPostLoginPermissions {
+                    PostLoginPermissionsView {
+                        PostLoginPermissionsPreference.hasCompleted = true
+                        withAnimation { hasCompletedPostLoginPermissions = true }
+                    }
+                    .transition(.opacity)
+                }
             } else {
                 LoginView()
             }
@@ -53,11 +65,19 @@ struct RootView: View {
             }
         }
         .transition(.opacity)
+        .overlay {
+            if callSession.callRatingSuccessToken != nil {
+                CallFeedbackSuccessView()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: callSession.callRatingSuccessToken)
+        .task(id: callSession.callRatingSuccessToken) {
+            await presentCallRatingSuccessIfNeeded()
+        }
         .task(id: rootVM.loggedIn) {
             guard rootVM.loggedIn else { return }
             await TelegramKeepMediaPolicy.applyStoredPolicy(service: TDLib.shared.service)
-            await PushNotificationsManager.shared.requestAuthorization()
-            await PermissionsManager.shared.requestPostLoginPermissions()
         }
         .fullScreenCover(
             isPresented: Binding(
@@ -112,6 +132,49 @@ struct RootView: View {
             )
         }
         .alert(
+            "Join Voice Chat?",
+            isPresented: Binding(
+                get: { rootVM.pendingGroupCallJoin != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        rootVM.pendingGroupCallJoin = nil
+                    }
+                },
+            ),
+            presenting: rootVM.pendingGroupCallJoin,
+        ) { _ in
+            Button("Join", action: rootVM.confirmPendingGroupCallJoin)
+            Button("Cancel", role: .cancel) { rootVM.pendingGroupCallJoin = nil }
+        } message: { pending in
+            Text(
+                pending.totalCount == 1
+                    ? "1 participant is in this voice chat. You will join with your microphone off."
+                    :
+                    "\(pending.totalCount) participants are in this voice chat. You will join with your microphone off.",
+            )
+        }
+        .alert(
+            rootVM.pendingVideoChatJoin?.isLiveStream == true ? "Join Live Stream?" : "Join Voice Chat?",
+            isPresented: Binding(
+                get: { rootVM.pendingVideoChatJoin != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        rootVM.pendingVideoChatJoin = nil
+                    }
+                },
+            ),
+            presenting: rootVM.pendingVideoChatJoin,
+        ) { pending in
+            Button(pending.isLiveStream ? "Watch" : "Join", action: rootVM.confirmPendingVideoChatJoin)
+            Button("Cancel", role: .cancel) { rootVM.pendingVideoChatJoin = nil }
+        } message: { pending in
+            Text(
+                pending.isLiveStream
+                    ? "Watch the live stream from \(pending.title)."
+                    : "Join \(pending.title) with your microphone off.",
+            )
+        }
+        .alert(
             "Link Error",
             isPresented: Binding(
                 get: { rootVM.deepLinkErrorMessage != nil },
@@ -150,13 +213,43 @@ struct RootView: View {
         ) {
             Button("OK") {}
         } message: {
-            Text("The session was terminated. If this wasn't you, consider changing your password in Two-Step Verification.")
+            Text(
+                "The session was terminated. If this wasn't you, consider changing your password in Two-Step Verification.",
+            )
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { callSession.shouldShowCallView },
+            set: { isPresented in
+                if isPresented {
+                    callSession.restoreCallView()
+                }
+            },
+        )) {
+            CallView()
+        }
+        .sheet(item: $callSession.pendingCallRating, content: CallRatingView.init)
     }
 
     // MARK: Private
 
     @State private var rootVM = RootVM.shared
-    @State private var incomingCall = IncomingCallCoordinator.shared
-    @State private var incomingCallMinimized = false
+    @State private var callSession = TelegramCallSession.shared
+    @State private var hasCompletedPostLoginPermissions = PostLoginPermissionsPreference.hasCompleted
+
+    private func presentCallRatingSuccessIfNeeded() async {
+        guard let token = callSession.callRatingSuccessToken else { return }
+        do {
+            try await Task.sleep(for: .milliseconds(300))
+        } catch {
+            return
+        }
+        guard callSession.callRatingSuccessToken == token else { return }
+        UIAccessibility.post(notification: .announcement, argument: "Thanks for your feedback")
+        do {
+            try await Task.sleep(for: .seconds(2))
+        } catch {
+            return
+        }
+        callSession.dismissCallRatingSuccess(token: token)
+    }
 }

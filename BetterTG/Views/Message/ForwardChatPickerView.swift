@@ -98,7 +98,6 @@ struct ForwardChatPickerView: View {
 
                 Image(systemName: selectedChatIds.contains(chat.id) ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selectedChatIds.contains(chat.id) ? Color.accentColor : .secondary)
-                    .accessibilityHidden(true)
             }
         }
         .disabled(isForwarding)

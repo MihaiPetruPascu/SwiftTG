@@ -16,6 +16,8 @@
 		D10000000000000000000003 /* RLottieKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000005 /* RLottieKit */; };
 		D20000000000000000000001 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
 		D20000000000000000000003 /* TelegramWebM in Frameworks */ = {isa = PBXBuildFile; productRef = D20000000000000000000005 /* TelegramWebM */; };
+		D30000000000000000000003 /* TgVoipWebrtc in Frameworks */ = {isa = PBXBuildFile; productRef = D30000000000000000000005 /* TgVoipWebrtc */; };
+		D30000000000000000000004 /* TgVoipWebrtc in Embed Frameworks */ = {isa = PBXBuildFile; productRef = D30000000000000000000005 /* TgVoipWebrtc */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		DF9C5CC1292698BC00ED1CA8 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = DF9C5CC0292698BC00ED1CA8 /* TDLibKit */; };
 		E30000000000000000000002 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */; };
 		E30000000000000000000003 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E30000000000000000000001 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -26,6 +28,7 @@
 		F1000000000000000000000B /* BetterTGNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* BetterTGNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F1000000000000000000000F /* BetterTGShared/TelegramNotificationSoundManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000E /* BetterTGShared/TelegramNotificationSoundManifest.swift */; };
 		F10000000000000000000010 /* BetterTGShared/TelegramShareExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000000E /* BetterTGShared/TelegramShareExtension.swift */; };
+		G1000000000000000000000B /* BetterTGBroadcastUpload.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = G10000000000000000000001 /* BetterTGBroadcastUpload.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +53,13 @@
 			remoteGlobalIDString = F10000000000000000000003;
 			remoteInfo = BetterTGNotificationService;
 		};
+		G1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF4B997628C3F3F50087C1B9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = G10000000000000000000003;
+			remoteInfo = BetterTGBroadcastUpload;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -61,6 +71,7 @@
 			files = (
 				E1000000000000000000000B /* BetterTGShare.appex in Embed Foundation Extensions */,
 				F1000000000000000000000B /* BetterTGNotificationService.appex in Embed Foundation Extensions */,
+				G1000000000000000000000B /* BetterTGBroadcastUpload.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -81,7 +92,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				E30000000000000000000003 /* BetterTG/Vendor/TgVoipWebrtcBetterTGDynamic.framework in Embed Frameworks */,
+				D30000000000000000000004 /* TgVoipWebrtc in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -99,6 +110,7 @@
 		E10000000000000000000012 /* BetterTGShared/AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/AttachmentStaging.swift; sourceTree = "<group>"; };
 		F10000000000000000000001 /* BetterTGNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterTGNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1000000000000000000000E /* BetterTGShared/TelegramNotificationSoundManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterTGShared/TelegramNotificationSoundManifest.swift; sourceTree = "<group>"; };
+		G10000000000000000000001 /* BetterTGBroadcastUpload.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterTGBroadcastUpload.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -166,6 +178,13 @@
 			);
 			target = F10000000000000000000003 /* BetterTGNotificationService */;
 		};
+		G1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = G10000000000000000000003 /* BetterTGBroadcastUpload */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -176,6 +195,7 @@
 		DFD75B1C2D3DA0D8004E7CA6 /* BetterTG */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (DFD75B772D3DA0D8004E7CA6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTG; sourceTree = "<group>"; };
 		E10000000000000000000002 /* BetterTGShare */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (E1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTGShare; sourceTree = "<group>"; };
 		F10000000000000000000002 /* BetterTGNotificationService */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (F1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTGNotificationService; sourceTree = "<group>"; };
+		G10000000000000000000002 /* BetterTGBroadcastUpload */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (G1000000000000000000000A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BetterTGBroadcastUpload; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -208,6 +228,7 @@
 				29D283DD1F8E47DF90BEAF36 /* SwiftOGG in Frameworks */,
 				D10000000000000000000003 /* RLottieKit in Frameworks */,
 				D20000000000000000000003 /* TelegramWebM in Frameworks */,
+				D30000000000000000000003 /* TgVoipWebrtc in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -225,6 +246,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		G10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -236,6 +264,7 @@
 				A10000000000000000000003 /* BetterTGMac */,
 				E10000000000000000000002 /* BetterTGShare */,
 				F10000000000000000000002 /* BetterTGNotificationService */,
+				G10000000000000000000002 /* BetterTGBroadcastUpload */,
 				A20000000000000000000001 /* BetterTGShared */,
 				A20000000000000000000002 /* BetterTG/Secret */,
 				B30000000000000000000002 /* BetterTGTests */,
@@ -254,6 +283,7 @@
 				A10000000000000000000002 /* BetterTGMac.app */,
 				E10000000000000000000001 /* BetterTGShare.appex */,
 				F10000000000000000000001 /* BetterTGNotificationService.appex */,
+				G10000000000000000000001 /* BetterTGBroadcastUpload.appex */,
 				B30000000000000000000001 /* BetterTGTests.xctest */,
 			);
 			name = Products;
@@ -331,6 +361,7 @@
 			dependencies = (
 				E1000000000000000000000D /* PBXTargetDependency */,
 				F1000000000000000000000D /* PBXTargetDependency */,
+				G1000000000000000000000D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A20000000000000000000001 /* BetterTGShared */,
@@ -342,6 +373,7 @@
 				69151C5FAB054AB894A93455 /* SwiftOGG */,
 				D10000000000000000000005 /* RLottieKit */,
 				D20000000000000000000005 /* TelegramWebM */,
+				D30000000000000000000005 /* TgVoipWebrtc */,
 				AED4C5E0195046E893F77F0B /* CodeScanner */,
 			);
 			productName = BetterTG;
@@ -388,6 +420,26 @@
 			productReference = F10000000000000000000001 /* BetterTGNotificationService.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		G10000000000000000000003 /* BetterTGBroadcastUpload */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = G10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGBroadcastUpload" */;
+			buildPhases = (
+				G10000000000000000000004 /* Sources */,
+				G10000000000000000000005 /* Frameworks */,
+				G10000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				G10000000000000000000002 /* BetterTGBroadcastUpload */,
+			);
+			name = BetterTGBroadcastUpload;
+			productName = BetterTGBroadcastUpload;
+			productReference = G10000000000000000000001 /* BetterTGBroadcastUpload.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -414,6 +466,9 @@
 					F10000000000000000000003 = {
 						CreatedOnToolsVersion = 26.0;
 					};
+					G10000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 				};
 			};
 			buildConfigurationList = DF4B997928C3F3F50087C1B9 /* Build configuration list for PBXProject "BetterTG" */;
@@ -431,6 +486,7 @@
 				A6E7805221DFB1D743A23E6D /* XCRemoteSwiftPackageReference "swift-ogg" */,
 				D10000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/RLottieKit" */,
 				D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */,
+				D30000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TgVoipWebrtc" */,
 				18FA93183024B5DB00AF40BC /* XCRemoteSwiftPackageReference "CodeScanner" */,
 			);
 			productRefGroup = DF4B997F28C3F3F50087C1B9 /* Products */;
@@ -442,6 +498,7 @@
 				B30000000000000000000003 /* BetterTGTests */,
 				E10000000000000000000003 /* BetterTGShare */,
 				F10000000000000000000003 /* BetterTGNotificationService */,
+				G10000000000000000000003 /* BetterTGBroadcastUpload */,
 			);
 		};
 /* End PBXProject section */
@@ -476,6 +533,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		F10000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		G10000000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -547,6 +611,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		G10000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -564,6 +635,11 @@
 			isa = PBXTargetDependency;
 			target = F10000000000000000000003 /* BetterTGNotificationService */;
 			targetProxy = F1000000000000000000000C /* PBXContainerItemProxy */;
+		};
+		G1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = G10000000000000000000003 /* BetterTGBroadcastUpload */;
+			targetProxy = G1000000000000000000000C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -808,7 +884,7 @@
 				ENABLE_DEBUG_DYLIB = NO;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
 				DEVELOPMENT_TEAM = 949DJWKGYX;
 				ENABLE_PREVIEWS = YES;
@@ -819,20 +895,21 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "SwiftTG uses the camera to send photos, record video messages, and scan QR codes to link a device.";
-				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SwiftTG uses the camera for video calls, to send photos, record video messages, and scan QR codes to link a device.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "When you choose Sync Contacts, SwiftTG sends names and phone numbers from your address book to Telegram to find people you know.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "SwiftTG can use Face ID to quickly unlock the app instead of typing your passcode.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone to record voice and video messages.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone for voice and video calls and to record voice and video messages.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwiftTG needs to access Photos to save images you request.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwiftTG needs to access your Photos to let you send them in chats.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -867,7 +944,7 @@
 				CODE_SIGN_ENTITLEMENTS = BetterTG/BetterTG.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_ASSET_PATHS = "\"BetterTG/Preview Assets.xcassets\"";
 				DEVELOPMENT_TEAM = 949DJWKGYX;
 				ENABLE_PREVIEWS = YES;
@@ -878,20 +955,21 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTG/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "SwiftTG uses the camera to send photos, record video messages, and scan QR codes to link a device.";
-				INFOPLIST_KEY_NSContactsUsageDescription = "We would like to access your contacts to help you connect with people you know on Telegram.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SwiftTG uses the camera for video calls, to send photos, record video messages, and scan QR codes to link a device.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "When you choose Sync Contacts, SwiftTG sends names and phone numbers from your address book to Telegram to find people you know.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "SwiftTG can use Face ID to quickly unlock the app instead of typing your passcode.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SwiftTG uses your location to share it in a chat when you choose to.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone to record voice and video messages.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We would like to access Photos to save images you request.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We would like to access your Photos to let you send them in chats.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SwiftTG uses the microphone for voice and video calls and to record voice and video messages.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwiftTG needs to access Photos to save images you request.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwiftTG needs to access your Photos to let you send them in chats.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -923,8 +1001,8 @@
 				CODE_SIGN_ENTITLEMENTS = BetterTGShare/BetterTGShare.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 949DJWKGYX;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTGShare/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
@@ -955,8 +1033,8 @@
 				CODE_SIGN_ENTITLEMENTS = BetterTGShare/BetterTGShare.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 949DJWKGYX;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTGShare/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
@@ -985,8 +1063,8 @@
 				CODE_SIGN_ENTITLEMENTS = BetterTGNotificationService/BetterTGNotificationService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 949DJWKGYX;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTGNotificationService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
@@ -1017,8 +1095,8 @@
 				CODE_SIGN_ENTITLEMENTS = BetterTGNotificationService/BetterTGNotificationService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 949DJWKGYX;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterTGNotificationService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftTG;
@@ -1034,6 +1112,70 @@
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		G10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGBroadcastUpload/BetterTGBroadcastUpload.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGBroadcastUpload/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "SwiftTG Screen Sharing";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG.BroadcastUpload;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "BetterTGBroadcastUpload/BetterTGBroadcastUpload-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		G10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BetterTGBroadcastUpload/BetterTGBroadcastUpload.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = Y7J75349M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterTGBroadcastUpload/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "SwiftTG Screen Sharing";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gruiachiscop.BetterTG.BroadcastUpload;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "BetterTGBroadcastUpload/BetterTGBroadcastUpload-Bridging-Header.h";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1097,6 +1239,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		G10000000000000000000007 /* Build configuration list for PBXNativeTarget "BetterTGBroadcastUpload" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G10000000000000000000008 /* Debug */,
+				G10000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -1107,6 +1258,10 @@
 		D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Vendor/TelegramFFmpeg;
+		};
+		D30000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TgVoipWebrtc" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/TgVoipWebrtc;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1170,6 +1325,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D20000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TelegramFFmpeg" */;
 			productName = TelegramWebM;
+		};
+		D30000000000000000000005 /* TgVoipWebrtc */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D30000000000000000000007 /* XCLocalSwiftPackageReference "Vendor/TgVoipWebrtc" */;
+			productName = TgVoipWebrtc;
 		};
 		DF9C5CC0292698BC00ED1CA8 /* TDLibKit */ = {
 			isa = XCSwiftPackageProductDependency;

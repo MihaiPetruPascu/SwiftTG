@@ -21,6 +21,11 @@ import TDLibKit
 
     var callingCode = ""
     var code = ""
+    var codePhoneNumber = ""
+    var codeDeliveryType: AuthenticationCodeType?
+    var codeNextType: AuthenticationCodeType?
+    var codeResendCountdown = 0
+    var isSubmittingCode = false
     var emailAddress = ""
     var emailAddressPattern = ""
     var emailCode = ""
@@ -31,7 +36,15 @@ import TDLibKit
     var hasAcceptedTerms = false
     var hint = ""
     var loginState = LoginState.phoneNumber
+    var isSubmittingPhoneNumber = false
     var phoneNumber = ""
+    var hasRecoveryEmail = false
+    var recoveryEmailPattern = ""
+    var recoveryCode = ""
+    var newPassword = ""
+    var newPasswordHint = ""
+    var showsAccountResetConfirmation = false
+    var isRequestingPasswordRecovery = false
     var registrationFirstName = ""
     var registrationLastName = ""
     var registrationPhotoData: Data?
@@ -48,6 +61,71 @@ import TDLibKit
 
     var isPreview: Bool {
         mode == .preview
+    }
+
+    /// SMS-word and SMS-phrase codes are words, not digits - everything else is numeric.
+    var codeIsNumeric: Bool {
+        switch codeDeliveryType {
+        case .authenticationCodeTypeSmsPhrase, .authenticationCodeTypeSmsWord:
+            false
+        default:
+            true
+        }
+    }
+
+    /// Sentence under the field explaining where the code was sent, from `codeInfo.type`.
+    var codeDeliveryDescription: String {
+        let target = codePhoneNumber.isEmpty ? "your phone" : codePhoneNumber
+        switch codeDeliveryType {
+        case .authenticationCodeTypeTelegramMessage:
+            return "We sent the code to your other Telegram apps."
+        case .authenticationCodeTypeFirebaseAndroid, .authenticationCodeTypeFirebaseIos, .authenticationCodeTypeSms,
+             .authenticationCodeTypeSmsPhrase, .authenticationCodeTypeSmsWord:
+            return "We sent an SMS with the code to \(target)."
+        case .authenticationCodeTypeCall:
+            return "Telegram is calling \(target) to dictate the code."
+        case .authenticationCodeTypeMissedCall(let details):
+            return "Telegram is calling \(target). Enter the last \(details.length) digits of the number that calls."
+        case .authenticationCodeTypeFlashCall:
+            return "Telegram is calling \(target); the call ends by itself."
+        case .authenticationCodeTypeFragment:
+            return "Your code is available on Fragment for \(target)."
+        case .none:
+            return "Enter the code you received."
+        }
+    }
+
+    /// Label for the resend button, from `codeInfo.nextType` (how a resend would be delivered).
+    var codeResendActionTitle: String {
+        switch codeNextType {
+        case .authenticationCodeTypeCall, .authenticationCodeTypeFlashCall, .authenticationCodeTypeMissedCall:
+            "Call me with the code"
+        case .authenticationCodeTypeTelegramMessage:
+            "Send the code via Telegram"
+        case .authenticationCodeTypeSms, .authenticationCodeTypeSmsPhrase, .authenticationCodeTypeSmsWord:
+            "Send the code by SMS"
+        case .authenticationCodeTypeFragment:
+            "Get the code on Fragment"
+        default:
+            "Resend code"
+        }
+    }
+
+    var codeResendClock: String {
+        String(format: "%d:%02d", codeResendCountdown / 60, codeResendCountdown % 60)
+    }
+
+    /// Whether the bottom Continue button should be enabled. The phone and code steps gate on their
+    /// field being filled; other steps stay enabled and rely on their own `continueLogin` guards.
+    var canSubmitCurrentStep: Bool {
+        switch loginState {
+        case .phoneNumber:
+            TelegramPhoneNumber.normalized(callingCode: callingCode, number: phoneNumber) != nil
+        case .code:
+            !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            true
+        }
     }
 
     func start() async {
@@ -81,13 +159,19 @@ import TDLibKit
 
         switch loginState {
         case .phoneNumber:
-            guard TelegramPhoneNumber.normalized(callingCode: callingCode, number: phoneNumber) != nil else { return }
+            guard !isSubmittingPhoneNumber,
+                  TelegramPhoneNumber.normalized(callingCode: callingCode, number: phoneNumber) != nil
+            else { return }
             showPhoneConfirmation = true
         case .code:
+            let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !isSubmittingCode else { return }
             errorMessage = nil
+            isSubmittingCode = true
             Task {
+                defer { isSubmittingCode = false }
                 do {
-                    _ = try await service.checkAuthenticationCode(code: code)
+                    _ = try await service.checkAuthenticationCode(code: trimmed)
                 } catch {
                     guard !Task.isCancelled else { return }
                     errorMessage = TelegramLoginGuidance.errorDescription(error)
@@ -98,6 +182,22 @@ import TDLibKit
             Task {
                 do {
                     _ = try await service.checkAuthenticationPassword(password: twoFactor)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    errorMessage = TelegramLoginGuidance.errorDescription(error)
+                }
+            }
+        case .passwordRecovery:
+            let trimmedCode = recoveryCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedCode.isEmpty, !newPassword.isEmpty else { return }
+            errorMessage = nil
+            Task {
+                do {
+                    _ = try await service.recoverAuthenticationPassword(
+                        recoveryCode: trimmedCode,
+                        newPassword: newPassword,
+                        newHint: newPasswordHint.isEmpty ? nil : newPasswordHint,
+                    )
                 } catch {
                     guard !Task.isCancelled else { return }
                     errorMessage = TelegramLoginGuidance.errorDescription(error)
@@ -167,17 +267,92 @@ import TDLibKit
         continueLogin()
     }
 
+    /// Ask Telegram to send the code again (via `codeInfo.nextType`). Disabled until the countdown
+    /// from `codeInfo.timeout` reaches zero; the resulting fresh `authorizationStateWaitCode`
+    /// restarts that countdown.
+    func resendCode() {
+        guard mode == .live, codeResendCountdown == 0, !isSubmittingCode else { return }
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await service.resendAuthenticationCode()
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = TelegramLoginGuidance.errorDescription(error)
+            }
+        }
+    }
+
+    /// Return to the phone-number step to fix a mistyped number. `callingCode`/`phoneNumber` stay
+    /// filled in; submitting again re-runs `setAuthenticationPhoneNumber`, which TDLib accepts from
+    /// `authorizationStateWaitCode`.
+    func changePhoneNumber() {
+        cancelCodeCountdown()
+        code = ""
+        errorMessage = nil
+        lastCodeInfo = nil
+        loginState = .phoneNumber
+    }
+
+    /// "Forgot Password?" from the password step. With a recovery email on file, ask Telegram to
+    /// send a code there and move to the recovery step; without one, the only way back in is to
+    /// reset the account, so confirm that first.
+    func startPasswordRecovery() {
+        guard mode == .live, !isRequestingPasswordRecovery else { return }
+        guard hasRecoveryEmail else {
+            showsAccountResetConfirmation = true
+            return
+        }
+        isRequestingPasswordRecovery = true
+        errorMessage = nil
+        Task {
+            defer { isRequestingPasswordRecovery = false }
+            do {
+                _ = try await service.requestAuthenticationPasswordRecovery()
+                recoveryCode = ""
+                newPassword = ""
+                newPasswordHint = ""
+                loginState = .passwordRecovery
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = TelegramLoginGuidance.errorDescription(error)
+            }
+        }
+    }
+
+    func resetAccount() {
+        guard mode == .live else { return }
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await service.deleteAccount(reason: "Forgot password", password: nil)
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = TelegramLoginGuidance.errorDescription(error)
+            }
+        }
+    }
+
     func submitPhoneNumber() {
         if mode == .preview {
             showPhoneConfirmation = false
             loginState = .code
             expectedCodeLength = AuthenticationPreviewData.codeLength
+            codePhoneNumber = TelegramPhoneNumber.display(callingCode: callingCode, number: phoneNumber)
+            codeDeliveryType = .authenticationCodeTypeSms(.init(length: AuthenticationPreviewData.codeLength))
+            codeNextType = .authenticationCodeTypeCall(.init(length: AuthenticationPreviewData.codeLength))
+            codeResendCountdown = 0
             return
         }
 
-        guard let number = TelegramPhoneNumber.normalized(callingCode: callingCode, number: phoneNumber) else { return }
+        guard !isSubmittingPhoneNumber,
+              let number = TelegramPhoneNumber.normalized(callingCode: callingCode, number: phoneNumber)
+        else { return }
+        showPhoneConfirmation = false
         errorMessage = nil
+        isSubmittingPhoneNumber = true
         Task {
+            defer { isSubmittingPhoneNumber = false }
             do {
                 _ = try await service.setAuthenticationPhoneNumber(phoneNumber: number, settings: nil)
             } catch {
@@ -211,6 +386,26 @@ import TDLibKit
     @ObservationIgnored private var preferredCountryId: String?
     @ObservationIgnored private let service: any TelegramService
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var lastCodeInfo: AuthenticationCodeInfo?
+    @ObservationIgnored private var codeCountdownTask: Task<Void, Never>?
+
+    private func startCodeCountdown(seconds: Int) {
+        cancelCodeCountdown()
+        codeResendCountdown = max(0, seconds)
+        guard codeResendCountdown > 0 else { return }
+        codeCountdownTask = Task { [weak self] in
+            while let self, !Task.isCancelled, codeResendCountdown > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                codeResendCountdown -= 1
+            }
+        }
+    }
+
+    private func cancelCodeCountdown() {
+        codeCountdownTask?.cancel()
+        codeCountdownTask = nil
+    }
 
     private func observeAuthorizationState() {
         service.authorizationStatePublisher
@@ -222,13 +417,27 @@ import TDLibKit
     }
 
     private func apply(_ state: AuthorizationState) {
+        if case .authorizationStateWaitCode = state {} else {
+            cancelCodeCountdown()
+        }
         switch state {
         case .authorizationStateWaitPassword(let value):
-            loginState = .twoFactor
+            if loginState != .passwordRecovery {
+                loginState = .twoFactor
+            }
             hint = value.passwordHint
+            hasRecoveryEmail = value.hasRecoveryEmailAddress
+            recoveryEmailPattern = value.recoveryEmailAddressPattern
         case .authorizationStateWaitCode(let details):
             loginState = .code
-            expectedCodeLength = details.codeInfo.type.expectedLength
+            guard details.codeInfo != lastCodeInfo else { break }
+            lastCodeInfo = details.codeInfo
+            let info = details.codeInfo
+            expectedCodeLength = info.type.expectedLength
+            codePhoneNumber = info.phoneNumber
+            codeDeliveryType = info.type
+            codeNextType = info.nextType
+            startCodeCountdown(seconds: info.timeout)
         case .authorizationStateWaitPhoneNumber:
             loginState = .phoneNumber
         case .authorizationStateWaitEmailAddress:
@@ -242,8 +451,7 @@ import TDLibKit
             termsOfService = details.termsOfService
             hasAcceptedTerms = false
         case .authorizationStateClosed, .authorizationStateClosing, .authorizationStateLoggingOut:
-            loginState = .phoneNumber
-            errorMessage = "The Telegram authorization session ended. Please try again."
+            break
         case .authorizationStateWaitPremiumPurchase:
             waitPremiumErrorShown = true
         default:
@@ -253,8 +461,10 @@ import TDLibKit
 
     private func apply(countries: [CountryInfo], currentCountryCode: String?) {
         countryNums = TelegramPhoneNumber.countries(from: countries)
+        let automaticCountryCode = currentCountryCode.flatMap { $0.isEmpty ? nil : $0 }
+            ?? Locale.current.region?.identifier
         if callingCode.isEmpty,
-           let info = TelegramPhoneNumber.country(for: currentCountryCode, in: countryNums)
+           let info = TelegramPhoneNumber.country(for: automaticCountryCode, in: countryNums)
         {
             selectCountry(info)
         } else if callingCode.isEmpty {
@@ -281,7 +491,7 @@ import TDLibKit
             guard !code.isEmpty else { return }
             hint = AuthenticationPreviewData.passwordHint
             loginState = .twoFactor
-        case .emailAddress, .emailCode, .registration, .twoFactor:
+        case .emailAddress, .emailCode, .passwordRecovery, .registration, .twoFactor:
             break
         }
     }

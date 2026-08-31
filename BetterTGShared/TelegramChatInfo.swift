@@ -52,8 +52,8 @@ struct TelegramChatInfoData: Equatable {
     var isBot = false
     var blockableUserId: Int64?
     var callUserId: Int64?
-    var canBeCalled = false
-    var supportsVideoCalls = false
+    var canStartAudioCall = false
+    var canStartVideoCall = false
 }
 
 // MARK: - TelegramChatInfoMemberFilter
@@ -305,6 +305,14 @@ struct TelegramChatInfoLoader {
         info.usernames = user.usernames?.activeUsernames ?? []
         info.phoneNumber = user.phoneNumber.isEmpty ? nil : "+\(user.phoneNumber)"
         let currentUserId = await (try? service.getMe())?.id
+        let isRegularUser =
+            if case .userTypeRegular = user.type {
+                true
+            } else {
+                false
+            }
+        let isCallEligible = isRegularUser && !user.isSupport && userId != currentUserId
+        info.callUserId = isCallEligible ? userId : nil
         switch user.type {
         case .userTypeBot:
             info.isBot = true
@@ -326,9 +334,8 @@ struct TelegramChatInfoLoader {
         info.commonGroupsUserId = full.groupInCommonCount > 0 ? userId : nil
         info.isBlocked = full.blockList == .blockListMain
         info.usesUnofficialApp = full.usesUnofficialApp
-        info.callUserId = userId
-        info.canBeCalled = full.canBeCalled
-        info.supportsVideoCalls = full.supportsVideoCalls
+        info.canStartAudioCall = isCallEligible && full.canBeCalled
+        info.canStartVideoCall = info.canStartAudioCall && full.supportsVideoCalls
         if let botInfo = full.botInfo {
             if let privacyPolicyURL = botInfo.privacyPolicyUrl.telegramNilIfEmpty {
                 info.privacyPolicyURL = privacyPolicyURL

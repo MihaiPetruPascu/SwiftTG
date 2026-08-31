@@ -36,7 +36,6 @@ struct ChatBottomArea: View {
                     withAnimation { chatVM.recordingLocked = true }
                 } else if drag.translation.width < -150 {
                     discardRecordingFromGesture()
-                    hasBegunRecording = false
                 }
             }
             .onEnded { value in
@@ -116,7 +115,7 @@ struct ChatBottomArea: View {
             }
 
             HStack(alignment: .bottom, spacing: 6) {
-                if recordingActive || chatVM.preparingVideoNote || chatVM.finalizingVideoNote {
+                if showsRecordingIndicator {
                     recordingIndicator
                 } else {
                     leftSide
@@ -161,6 +160,13 @@ struct ChatBottomArea: View {
             if chatVM.recordingVideoNote || chatVM.pausedVideoNote || chatVM.preparingVideoNote {
                 chatVM.cancelRecordingVideo()
             }
+            if chatVM.recordingVoiceNote {
+                chatVM.cancelRecordingVoice()
+            }
+            // The record session is kept active across multiple recordings within the same chat
+            // visit (see VoiceRecordingController) instead of tearing it down after each one, so
+            // it only needs deactivating once, here, when there's no more recording to come back to.
+            Media.shared.endAudioSessionRecord()
             Task.background { [chatVM] in await chatVM.updateDraft() }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -497,9 +503,9 @@ struct ChatBottomArea: View {
     var rightSide: some View {
         Group {
             if chatVM.showSendButton || chatVM.recordingLocked {
-                Image("send")
+                Image(systemName: "arrow.up.circle.fill")
                     .resizable()
-                    .clipShape(.circle)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 32, height: 32)
                     .padding(.bottom, 3)
             } else {
@@ -894,6 +900,10 @@ struct ChatBottomArea: View {
 
     private var recordingActive: Bool {
         chatVM.recordingVoiceNote || chatVM.recordingVideoNote || chatVM.pausedVideoNote
+    }
+
+    private var showsRecordingIndicator: Bool {
+        recordingActive || chatVM.preparingVideoNote || chatVM.finalizingVideoNote
     }
 
     private var formattedRecordingDuration: String {

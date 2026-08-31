@@ -70,6 +70,7 @@ struct TelegramStorageSettingsView: View {
             Section("Storage Usage") {
                 LabeledContent("Cached media", value: formattedCacheSize)
                 LabeledContent("Cached files", value: "\(cachedFileCount)")
+                LabeledContent("Database", value: formattedDatabaseSize)
 
                 Button("Clear Cache", role: .destructive) {
                     confirmsCacheClear = true
@@ -84,6 +85,11 @@ struct TelegramStorageSettingsView: View {
                     } label: {
                         Label("Automatic Media Download", systemImage: "arrow.down.circle")
                     }
+                    NavigationLink {
+                        TelegramAutoSaveSettingsView(service: service)
+                    } label: {
+                        Label("Auto-Save Media", systemImage: "square.and.arrow.down")
+                    }
                 #else
                     Button {
                         presentedDataSetting = .automaticMediaDownload
@@ -92,7 +98,26 @@ struct TelegramStorageSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)
+                    Button {
+                        presentedDataSetting = .autoSaveMedia
+                    } label: {
+                        Label("Auto-Save Media", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
                 #endif
+            }
+
+            Section {
+                Picker("Use Less Data for Calls", selection: $callDataSaving) {
+                    ForEach(TelegramCallDataSaving.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+            } footer: {
+                Text(
+                    "Using less data may improve your experience on bad networks, but will slightly decrease audio quality.",
+                )
             }
 
             Section("Keep Media") {
@@ -187,6 +212,7 @@ struct TelegramStorageSettingsView: View {
     #if os(macOS)
     private enum DataSetting: String, Identifiable {
         case automaticMediaDownload
+        case autoSaveMedia
         case proxy
 
         // MARK: Internal
@@ -198,6 +224,8 @@ struct TelegramStorageSettingsView: View {
         switch item {
         case .automaticMediaDownload:
             TelegramAutoDownloadSettingsView(service: service)
+        case .autoSaveMedia:
+            TelegramAutoSaveSettingsView(service: service)
         case .proxy:
             TelegramProxySettingsView(service: service)
         }
@@ -233,8 +261,11 @@ struct TelegramStorageSettingsView: View {
 
     @AppStorage(TelegramKeepMediaPolicy.defaultsKey) private var keepMediaDays = TelegramKeepMediaPolicy.forever
         .rawValue
+    @AppStorage(TelegramCallSettings.dataSavingDefaultsKey) private var callDataSaving = TelegramCallSettings
+        .dataSaving
     @State private var cachedFileCount = 0
     @State private var cachedFilesSize: Int64 = 0
+    @State private var databaseSize: Int64 = 0
     @State private var canIgnoreSensitiveContentRestrictions = false
     @State private var confirmsCacheClear = false
     @State private var errorMessage: String?
@@ -262,6 +293,12 @@ struct TelegramStorageSettingsView: View {
 
     private var formattedCacheSize: String {
         ByteCountFormatter.string(fromByteCount: cachedFilesSize, countStyle: .file)
+    }
+
+    /// TDLib's own approximate figure for the local database (`getStorageStatisticsFast`) - the
+    /// message/chat store on disk, separate from the media cache above.
+    private var formattedDatabaseSize: String {
+        ByteCountFormatter.string(fromByteCount: databaseSize, countStyle: .file)
     }
 
     private var sensitiveContentBinding: Binding<Bool> {
@@ -314,6 +351,7 @@ struct TelegramStorageSettingsView: View {
             let statistics = try await service.getStorageStatisticsFast()
             cachedFilesSize = statistics.filesSize
             cachedFileCount = statistics.fileCount
+            databaseSize = statistics.databaseSize
         } catch {
             errorMessage = telegramErrorDescription(error)
         }
@@ -338,6 +376,7 @@ struct TelegramStorageSettingsView: View {
             let statistics = try await service.getStorageStatisticsFast()
             cachedFilesSize = statistics.filesSize
             cachedFileCount = statistics.fileCount
+            databaseSize = statistics.databaseSize
         } catch {
             errorMessage = telegramErrorDescription(error)
         }

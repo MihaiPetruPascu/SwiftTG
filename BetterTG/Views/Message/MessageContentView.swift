@@ -61,7 +61,12 @@ struct MessageContentView: View {
                     MessageContactView(content: messageContact, onTap: onContactTap)
                 case .messageLiveLocation, .messageLocation, .messageVenue:
                     if let presentation = customMessage.locationPresentation {
-                        MessageLocationView(presentation: presentation, onTap: onLocationTap)
+                        MessageLocationView(
+                            presentation: presentation,
+                            messageId: customMessage.id,
+                            onTap: onLocationTap,
+                            accessibilityActions: { EmptyView() },
+                        )
                     }
                 default:
                     EmptyView()

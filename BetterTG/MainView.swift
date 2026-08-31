@@ -1,5 +1,6 @@
 // MainView.swift
 
+import AVFoundation
 import SwiftUI
 
 // MARK: - MainView
@@ -12,6 +13,12 @@ struct MainView: View {
             Tab("Contacts", systemImage: "person.2.fill", value: MainTab.contacts) {
                 NavigationStack {
                     ContactsView(service: rootVM.service)
+                }
+            }
+
+            Tab("Calls", systemImage: "phone.fill", value: MainTab.calls) {
+                NavigationStack {
+                    CallsView(service: rootVM.service)
                 }
             }
 
@@ -64,6 +71,7 @@ struct MainView: View {
 
     private enum MainTab: Hashable {
         case contacts
+        case calls
         case chats
         case you
     }
@@ -126,7 +134,7 @@ private struct MainNavigationRootView: View {
                 rootVM.confirmChatDelete = ConfirmChatDelete(chat: nil, show: false)
             }
         }
-        .confirmationDialog(
+        .alert(
             "Clear history in \(rootVM.confirmChatClearHistory.chat?.title ?? "chat")?",
             isPresented: $rootVM.confirmChatClearHistory.show,
         ) {
@@ -146,7 +154,7 @@ private struct MainNavigationRootView: View {
         } message: {
             Text("All messages will be removed, but the chat will remain in your chat list.")
         }
-        .confirmationDialog(
+        .alert(
             "Leave \(rootVM.confirmChatLeave.chat?.title ?? "chat")?",
             isPresented: $rootVM.confirmChatLeave.show,
         ) {

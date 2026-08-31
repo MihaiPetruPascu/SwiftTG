@@ -98,6 +98,11 @@ import TDLibKit
     var scheduledMessagesError: String?
     var detectedChatLanguage: String?
     var isChatTranslationEnabled = false
+    /// The chat's video chat (group voice chat / channel live stream) and the `GroupCall` behind it,
+    /// kept live from `updateChatVideoChat` / `updateGroupCall`. An empty `groupCallId` means none.
+    /// See `ChatVM+VideoChat`.
+    var videoChat = VideoChat(defaultParticipantId: nil, groupCallId: 0, hasParticipants: false)
+    var videoChatCall: GroupCall?
     @ObservationIgnored var dateFormatter: DateFormatter = {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm"
@@ -129,6 +134,7 @@ import TDLibKit
     @ObservationIgnored var pinnedMessagesGeneration = 0
     @ObservationIgnored var scheduledMessagesTask: Task<Void, Never>?
     @ObservationIgnored var scheduledMessagesGeneration = 0
+    @ObservationIgnored var videoChatRefreshTask: Task<Void, Never>?
     /// Bumped every time a new history-loading task starts, so a superseded task's completion
     /// can tell it's stale and avoid clobbering `loadingMessagesTask`/`pendingNavigationMessageId`
     /// out from under a newer one (cancellation doesn't stop a network call already in flight).
@@ -165,12 +171,15 @@ import TDLibKit
         let chatId = customChat.chat.id
         isChatTranslationEnabled = TelegramChatTranslationPreferences.isEnabled(chatId: chatId)
         Task { _ = try? await service.openChat(chatId: chatId) }
+        // Opening the chat reads its messages; drop any lingering system notifications for it so
+        // Notification Center doesn't keep stale banners after the user taps one to get here.
+        TelegramDeliveredNotifications.clear(for: customChat.chat)
         setPublishers()
+        startVideoChatObservation()
         refreshConversationStatus()
         refreshPinnedMessages()
         loadMessages()
         loadThreadRootMessageIfNeeded()
-        Media.shared.onChatOpen(title: customChat.chat.title)
 
         Task.main {
             guard let draftMessage = self.customChat.draftMessage else { return }

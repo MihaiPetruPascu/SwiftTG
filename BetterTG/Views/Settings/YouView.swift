@@ -88,6 +88,23 @@ struct YouView: View {
                     Label("Appearance", systemImage: "paintpalette")
                 }
             }
+
+            Section {
+                Button("Log Out", role: .destructive) {
+                    showsLogoutConfirmation = true
+                }
+                .disabled(isLoggingOut)
+            }
+
+            #if DEBUG
+            Section("Developer") {
+                NavigationLink {
+                    ConferenceLabView()
+                } label: {
+                    Label("Conference Lab", systemImage: "person.3")
+                }
+            }
+            #endif
         }
         .navigationTitle("You")
         .task {
@@ -106,13 +123,23 @@ struct YouView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .alert("Log Out?", isPresented: $showsLogoutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Log Out", role: .destructive) { logOut() }
+        } message: {
+            Text(
+                "You'll need to sign in again with your phone number, and this device's local copy of your chats will be cleared.",
+            )
+        }
     }
 
     // MARK: Private
 
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var isLoggingOut = false
     @State private var showsEditProfile = false
+    @State private var showsLogoutConfirmation = false
     @State private var user: User?
 
     private let service: any TelegramService
@@ -165,6 +192,21 @@ struct YouView: View {
             user = try await service.getMe()
         } catch {
             errorMessage = telegramErrorDescription(error)
+        }
+    }
+
+    @MainActor private func logOut() {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
+        Task {
+            defer { isLoggingOut = false }
+            do {
+                // On success TDLib returns to the phone-number state and `RootView` swaps to the
+                // login screen on its own.
+                _ = try await service.logOut()
+            } catch {
+                errorMessage = telegramErrorDescription(error)
+            }
         }
     }
 }

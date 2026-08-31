@@ -4,6 +4,7 @@ import Combine
 import PhotosUI
 import SwiftUI
 import TDLibKit
+import UIKit
 
 // MARK: - PresentedChatActionError
 
@@ -66,6 +67,13 @@ struct ChatView: View {
                 conversationSearchField
                 Divider()
             } else {
+                if chatVM.hasActiveVideoChat {
+                    ChatVideoChatBannerView(
+                        call: chatVM.videoChatCall,
+                        isChannel: chatVM.customChat.kind == .channel,
+                        join: joinActiveVideoChat,
+                    )
+                }
                 ChatTopBannerView(chatVM: chatVM) {
                     showsPinnedMessages = true
                 }
@@ -190,6 +198,16 @@ struct ChatView: View {
                     .accessibilityLabel(backButtonAccessibilityLabel)
                 }
                 ToolbarItem(placement: .principal) { principal }
+                if callPeer != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button("Audio Call", systemImage: "phone", action: startAudioCall)
+                            Button("Video Call", systemImage: "video", action: startVideoCall)
+                        } label: {
+                            Label("Call", systemImage: "phone")
+                        }
+                    }
+                }
             }
         }
         .alert(
@@ -219,6 +237,18 @@ struct ChatView: View {
                     chatVM.messageActionError = nil
                 },
             )
+        }
+        .alert("Camera Access Required", isPresented: $showsCameraPermissionAlert) {
+            Button("Open Settings", action: openSettings)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Allow camera access in Settings to start video calls.")
+        }
+        .alert("Microphone Access Required", isPresented: $showsMicrophonePermissionAlert) {
+            Button("Open Settings", action: openSettings)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Allow microphone access in Settings to make calls.")
         }
         .navigationDestination(isPresented: $showsChatInfo) {
             ChatInfoView()
@@ -354,6 +384,7 @@ struct ChatView: View {
     
     // MARK: Private
 
+    @Environment(\.openURL) private var openURL
     @FocusState private var conversationSearchFocused
     @State private var initialScrollPosition = ScrollPosition(idType: Int64.self, edge: .bottom)
     @State private var navigationBarHeight = CGFloat.zero
@@ -361,6 +392,8 @@ struct ChatView: View {
     @State private var rootVM = RootVM.shared
     @State private var showsChatInfo = false
     @State private var showsPinnedMessages = false
+    @State private var showsCameraPermissionAlert = false
+    @State private var showsMicrophonePermissionAlert = false
     @State private var presentedActionError: PresentedChatActionError?
 
     private var unreadChatCount: Int {
@@ -398,6 +431,19 @@ struct ChatView: View {
             .first {
                 !$0.message.isOutgoing && $0.id > chatVM.initialLastReadInboxMessageId
             }?.id
+    }
+
+    /// Calls (Phase 1) are 1:1 only - no button for bots, groups, or channels.
+    private var callPeer: (id: Int64, displayName: String)? {
+        guard case .user(let user) = chatVM.customChat.type else { return nil }
+        let name = [user.firstName, user.lastName].filter { !$0.isEmpty }.joined(separator: " ")
+        return (id: user.id, displayName: name.isEmpty ? chatVM.customChat.displayTitle : name)
+    }
+
+    private var principalAccessibilityLabel: String {
+        let title = titleOverride ?? chatVM.customChat.displayTitle
+        let status = chatVM.actionStatus.isEmpty ? chatVM.onlineStatus : chatVM.actionStatus
+        return status.isEmpty ? title : "\(title), \(status)"
     }
 
     private var conversationSearchField: some View {
@@ -500,10 +546,71 @@ struct ChatView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private var principalAccessibilityLabel: String {
-        let title = titleOverride ?? chatVM.customChat.displayTitle
-        let status = chatVM.actionStatus.isEmpty ? chatVM.onlineStatus : chatVM.actionStatus
-        return status.isEmpty ? title : "\(title), \(status)"
+    private func startAudioCall() {
+        guard let callPeer else { return }
+        CallKitManager.shared.startOutgoingCall(
+            userId: callPeer.id,
+            displayName: callPeer.displayName,
+            onMicrophonePermissionDenied: {
+                showsMicrophonePermissionAlert = true
+            },
+        )
+    }
+
+    private func joinActiveVideoChat() {
+        let videoChat = chatVM.videoChat
+        guard videoChat.groupCallId != 0 else { return }
+        Task { @MainActor in
+            let session = TelegramCallSession.shared
+            if session.groupCallCoordinator != nil {
+                session.restoreCallView()
+                return
+            }
+
+            let scheduled = chatVM.videoChatCall?.scheduledStartDate ?? 0 > 0
+            if scheduled, chatVM.videoChatCall?.canBeManaged != true {
+                do {
+                    _ = try await chatVM.service.toggleVideoChatEnabledStartNotification(
+                        enabledStartNotification: !(chatVM.videoChatCall?.enabledStartNotification ?? false),
+                        groupCallId: videoChat.groupCallId,
+                    )
+                } catch {
+                    presentedActionError = PresentedChatActionError(message: telegramErrorDescription(error))
+                }
+                return
+            }
+
+            let joined = await session.joinVideoChat(
+                groupCallId: videoChat.groupCallId,
+                participantId: videoChat.defaultParticipantId,
+                startScheduled: scheduled,
+            )
+            if !joined {
+                presentedActionError = PresentedChatActionError(
+                    message: "This voice chat couldn't be opened.",
+                )
+            }
+        }
+    }
+
+    private func startVideoCall() {
+        guard let callPeer else { return }
+        CallKitManager.shared.startOutgoingCall(
+            userId: callPeer.id,
+            displayName: callPeer.displayName,
+            isVideo: true,
+            onMicrophonePermissionDenied: {
+                showsMicrophonePermissionAlert = true
+            },
+            onCameraPermissionDenied: {
+                showsCameraPermissionAlert = true
+            },
+        )
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
     }
 
     private func positionInitialMessagesIfNeeded() {

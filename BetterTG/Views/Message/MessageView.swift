@@ -2,6 +2,7 @@
 
 import SwiftUI
 import TDLibKit
+import UIKit
 
 struct MessageView: View {
     // MARK: Internal
@@ -30,6 +31,10 @@ struct MessageView: View {
     @State var selectedStickerPack: TelegramStickerPackReference?
     @State var pendingStickerFromPack: Sticker?
     @State var stickerToEdit: Sticker?
+    @State var showsCameraPermissionAlert = false
+    @State var showsMicrophonePermissionAlert = false
+    @State var showsConferenceJoinError = false
+    @State var reportRequest: TelegramReportRequest?
 
     var accessibilityDescription: String {
         var prefix = ""
@@ -39,7 +44,7 @@ struct MessageView: View {
         }
         var parts = [String]()
         if case .messageReplyToMessage = customMessage.message.replyTo {
-            parts.append("Replying to \(customMessage.replySenderName ?? "message")")
+            parts.append("Replying to \(customMessage.replySpokenSenderName ?? "message")")
         }
         let translatedText = customMessage.showsTranslation ? customMessage.translatedText?.text : nil
         if let serviceMessageText = customMessage.serviceMessageText {
@@ -174,7 +179,18 @@ struct MessageView: View {
         customMessage.messageChecklist != nil
     }
 
+    /// This device's own live-location message while it's still being updated. It renders its own
+    /// "Stop Sharing" button, so - like a poll's option buttons - it must stay out of the flattened
+    /// message accessibility element or VoiceOver can't reach that button.
+    private var isActiveOutgoingLiveLocation: Bool {
+        guard case .messageLiveLocation = customMessage.message.content else { return false }
+        return TelegramLiveLocationManager.shared.activeShares[customMessage.id] != nil
+    }
+
     private var hasInlineVisualMetadata: Bool {
+        if customMessage.messageCall != nil || customMessage.messageGroupCall != nil {
+            return true
+        }
         guard let formattedText = customMessage.formattedText else { return false }
         return !formattedText.text.isEmpty
     }
@@ -441,6 +457,27 @@ struct MessageView: View {
 
     /// The poll/checklist/media-or-document switch, pre-erased - see `contentColumnPieces`.
     private var contentSection: AnyView {
+        if let messageCall = customMessage.messageCall {
+            return AnyView(
+                MessageCallView(
+                    presentation: TelegramCallMessagePresentation(
+                        content: messageCall,
+                        isOutgoing: customMessage.message.isOutgoing,
+                    ),
+                    dateText: chatVM.dateFormatter.string(from: customMessage.date),
+                ),
+            )
+        }
+        if let messageGroupCall = customMessage.messageGroupCall {
+            return AnyView(
+                MessageGroupCallView(
+                    content: messageGroupCall,
+                    isOutgoing: customMessage.message.isOutgoing,
+                    messageDate: customMessage.message.date,
+                    dateText: chatVM.dateFormatter.string(from: customMessage.date),
+                ),
+            )
+        }
         if let messagePoll = customMessage.messagePoll {
             return AnyView(
                 TelegramPollView(
@@ -472,6 +509,17 @@ struct MessageView: View {
                             messageAccessibilityActions
                         }
                 },
+            )
+        }
+        if isActiveOutgoingLiveLocation, let presentation = customMessage.locationPresentation {
+            return AnyView(
+                MessageLocationView(
+                    presentation: presentation,
+                    messageId: customMessage.id,
+                    accessibilityContext: accessibilityDescription,
+                    onTap: activateLocation,
+                    accessibilityActions: { messageAccessibilityActions },
+                ),
             )
         }
         if customMessage.messageDocument != nil
@@ -537,10 +585,32 @@ struct MessageView: View {
         }
         .accessibilityHidden(hasAccessibilityGroup)
 
-        if isPollMessage || isChecklistMessage {
+        if customMessage.messageCall != nil, callPeer != nil {
+            return AnyView(messageAccessibilityElement(
+                Button(action: startCallBack) {
+                    column
+                }
+                .buttonStyle(.plain),
+            ))
+        }
+        if customMessage.messageGroupCall != nil {
+            return AnyView(messageAccessibilityElement(
+                Button(action: openConferenceCall) {
+                    column
+                }
+                .buttonStyle(.plain),
+            ))
+        }
+        if isPollMessage || isChecklistMessage || isActiveOutgoingLiveLocation {
             return AnyView(column)
         }
         return AnyView(messageAccessibilityElement(column))
+    }
+
+    private var callPeer: (id: Int64, displayName: String)? {
+        guard case .user(let user) = chatVM.customChat.type else { return nil }
+        let name = telegramUserDisplayName(user)
+        return (id: user.id, displayName: name.isEmpty ? chatVM.customChat.displayTitle : name)
     }
 
     /// Each top-level piece below is individually type-erased into `AnyView` and combined via
@@ -582,6 +652,9 @@ struct MessageView: View {
                     },
                 )
             }
+            .sheet(item: $reportRequest) { request in
+                TelegramReportView(service: chatVM.service, request: request)
+            }
             .sheet(item: $stickerToEdit) { sticker in
                 TelegramStickerEditor(
                     sticker: sticker,
@@ -604,6 +677,23 @@ struct MessageView: View {
                 Button("OK") {}
             } message: {
                 Text(commentsErrorMessage ?? "")
+            }
+            .alert("Microphone Access Required", isPresented: $showsMicrophonePermissionAlert) {
+                Button("Open Settings", action: openSettings)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Allow microphone access in Settings to make calls.")
+            }
+            .alert("Camera Access Required", isPresented: $showsCameraPermissionAlert) {
+                Button("Open Settings", action: openSettings)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Allow camera access in Settings to start video calls.")
+            }
+            .alert("Couldn't Open Group Call", isPresented: $showsConferenceJoinError) {
+                Button("OK") {}
+            } message: {
+                Text("This group call is no longer available, or another call is already active.")
             }
             .alert("Delete message?", isPresented: $showDeleteOptions) {
                 if customMessage.properties.canBeDeletedOnlyForSelf {
@@ -805,5 +895,44 @@ struct MessageView: View {
             content: messageVideoNote,
             service: chatVM.service,
         )
+    }
+
+    private func startCallBack() {
+        guard let callPeer, let messageCall = customMessage.messageCall else { return }
+        CallKitManager.shared.startOutgoingCall(
+            userId: callPeer.id,
+            displayName: callPeer.displayName,
+            isVideo: messageCall.isVideo,
+            onMicrophonePermissionDenied: {
+                showsMicrophonePermissionAlert = true
+            },
+            onCameraPermissionDenied: {
+                showsCameraPermissionAlert = true
+            },
+        )
+    }
+
+    private func openConferenceCall() {
+        let message = customMessage.message
+        let session = TelegramCallSession.shared
+        if session.groupCallCoordinator != nil {
+            session.restoreCallView()
+            return
+        }
+        Task { @MainActor in
+            let joined = await session.joinConference(
+                chatId: message.chatId,
+                messageId: message.id,
+                isMuted: false,
+            )
+            if !joined {
+                showsConferenceJoinError = true
+            }
+        }
+    }
+
+    private func openSettings() {
+        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(settingsURL)
     }
 }

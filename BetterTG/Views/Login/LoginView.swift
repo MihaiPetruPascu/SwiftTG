@@ -84,29 +84,109 @@ struct LoginView: View {
                     }
                 case .code:
                     loginStateView {
-                        TextField("Code", text: $model.code)
-                            .onChange(of: model.code) { _, code in
-                                if let expectedCodeLength = model.expectedCodeLength,
-                                   code.count == expectedCodeLength
-                                {
+                        VStack(spacing: 12) {
+                            TextField("Code", text: $model.code)
+                                .focused($focused, equals: .code)
+                                .keyboardType(model.codeIsNumeric ? .numberPad : .default)
+                                .textContentType(.oneTimeCode)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .submitLabel(.go)
+                                .onSubmit { model.continueLogin() }
+                                .onChange(of: model.code) { _, code in
+                                    guard model.codeIsNumeric,
+                                          let expected = model.expectedCodeLength,
+                                          code.count == expected
+                                    else { return }
                                     model.continueLogin()
                                 }
+                                .padding()
+                                .background(Color.gray6)
+                                .clipShape(.rect(cornerRadius: 10))
+
+                            Text(model.codeDeliveryDescription)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button {
+                                model.resendCode()
+                            } label: {
+                                Text(model.codeResendCountdown > 0
+                                    ? "\(model.codeResendActionTitle) in \(model.codeResendClock)"
+                                    : model.codeResendActionTitle)
                             }
-                            .focused($focused, equals: .code)
-                            .keyboardType(.numberPad)
-                            .padding()
-                            .background(Color.gray6)
-                            .clipShape(.rect(cornerRadius: 10))
+                            .font(.footnote)
+                            .disabled(model.codeResendCountdown > 0 || model.isSubmittingCode)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button("Change Number") { model.changePhoneNumber() }
+                                .font(.footnote)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .onAppear { focused = .code }
                 case .twoFactor:
                     loginStateView {
-                        SecureField(model.hint.isEmpty ? "2FA" : model.hint, text: $model.twoFactor)
-                            .focused($focused, equals: .twoFactor)
-                            .textContentType(.password)
-                            .keyboardType(.alphabet)
-                            .padding()
-                            .background(Color.gray6)
-                            .clipShape(.rect(cornerRadius: 10))
+                        VStack(spacing: 12) {
+                            SecureField("Password", text: $model.twoFactor)
+                                .focused($focused, equals: .twoFactor)
+                                .textContentType(.password)
+                                .keyboardType(.alphabet)
+                                .submitLabel(.go)
+                                .onSubmit { model.continueLogin() }
+                                .padding()
+                                .background(Color.gray6)
+                                .clipShape(.rect(cornerRadius: 10))
+
+                            Text(model.hint.isEmpty
+                                ? "Enter your two-step verification password."
+                                : "Hint: \(model.hint)")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button("Forgot Password?") {
+                                model.startPasswordRecovery()
+                            }
+                            .font(.footnote)
+                            .disabled(model.isRequestingPasswordRecovery)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                case .passwordRecovery:
+                    loginStateView {
+                        VStack(spacing: 12) {
+                            TextField("Recovery Code", text: $model.recoveryCode)
+                                .focused($focused, equals: .recoveryCode)
+                                .keyboardType(.numberPad)
+                                .textContentType(.oneTimeCode)
+                                .padding()
+                                .background(Color.gray6)
+                                .clipShape(.rect(cornerRadius: 10))
+
+                            SecureField("New Password", text: $model.newPassword)
+                                .focused($focused, equals: .newPassword)
+                                .textContentType(.newPassword)
+                                .keyboardType(.alphabet)
+                                .padding()
+                                .background(Color.gray6)
+                                .clipShape(.rect(cornerRadius: 10))
+
+                            TextField("New Hint (optional)", text: $model.newPasswordHint)
+                                .focused($focused, equals: .newPasswordHint)
+                                .keyboardType(.alphabet)
+                                .padding()
+                                .background(Color.gray6)
+                                .clipShape(.rect(cornerRadius: 10))
+
+                            Text(model.recoveryEmailPattern.isEmpty
+                                ? "Enter the code sent to your recovery email, then choose a new password."
+                                : "Enter the code sent to \(model.recoveryEmailPattern), then choose a new password.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 case .emailAddress:
                     loginStateView {
@@ -193,11 +273,18 @@ struct LoginView: View {
                 }
                 model.continueLogin()
             } label: {
-                Text("Continue")
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity)
+                Group {
+                    if model.isSubmittingCode || model.isSubmittingPhoneNumber {
+                        ProgressView()
+                    } else {
+                        Text("Continue")
+                    }
+                }
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(model.isSubmittingCode || model.isSubmittingPhoneNumber || !model.canSubmitCurrentStep)
             .padding()
         }
         .alert(
@@ -227,6 +314,17 @@ struct LoginView: View {
             }
         } message: {
             Text("Is this the correct number?")
+        }
+        .alert("Reset Account?", isPresented: $model.showsAccountResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Account", role: .destructive) {
+                model.resetAccount()
+            }
+        } message: {
+            Text(
+                "You have no recovery email set, so the password can't be restored. "
+                    + "Resetting deletes this account and all its messages. This can't be undone.",
+            )
         }
         .alert("Terms of Service", isPresented: $model.showsTermsConfirmation) {
             Button("Decline", role: .cancel) {}
@@ -260,7 +358,10 @@ struct LoginView: View {
         case emailCode
         case firstName
         case lastName
+        case newPassword
+        case newPasswordHint
         case phoneNumber
+        case recoveryCode
         case twoFactor
     }
 

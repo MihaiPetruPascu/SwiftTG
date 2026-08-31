@@ -15,6 +15,29 @@ struct TelegramPendingDeepLinkJoin: Identifiable {
     var id: String { inviteLink }
 }
 
+// MARK: - TelegramPendingGroupCallJoin
+
+/// Preview information TDLib exposes before joining a conference invite link.
+struct TelegramPendingGroupCallJoin: Identifiable {
+    let inviteLink: String
+    let participantIds: [MessageSender]
+    let totalCount: Int
+
+    var id: String { inviteLink }
+}
+
+// MARK: - TelegramPendingVideoChatJoin
+
+struct TelegramPendingVideoChatJoin: Identifiable {
+    let chatId: Int64
+    let groupCallId: Int
+    let inviteHash: String
+    let title: String
+    let isLiveStream: Bool
+
+    var id: String { "\(chatId):\(groupCallId):\(inviteHash)" }
+}
+
 // MARK: - TelegramDeepLinkAction
 
 /// What a resolved link means for the app to do next - kept separate from the actual navigation,
@@ -25,6 +48,8 @@ enum TelegramDeepLinkAction {
     /// TDLib already resolved the invite to a chat the user isn't a member of yet - show a
     /// confirmation before actually joining, per `InternalLinkTypeChatInvite`'s own doc comment.
     case confirmJoin(ChatInviteLinkInfo, inviteLink: String)
+    case confirmGroupCallJoin(TelegramPendingGroupCallJoin)
+    case confirmVideoChatJoin(TelegramPendingVideoChatJoin)
     case addProxy(Proxy)
     case openExternally(URL)
     case unsupported
@@ -75,6 +100,29 @@ enum TelegramDeepLink {
                 return .confirmJoin(info, inviteLink: value.inviteLink)
             }
             return .openChat(chatId: info.chatId, messageId: nil)
+
+        case .internalLinkTypeGroupCall(let value):
+            guard let participants = try? await service.getGroupCallParticipants(
+                inputGroupCall: .inputGroupCallLink(.init(link: value.inviteLink)),
+                limit: 20,
+            ) else { return .unsupported }
+            return .confirmGroupCallJoin(TelegramPendingGroupCallJoin(
+                inviteLink: value.inviteLink,
+                participantIds: participants.participantIds,
+                totalCount: participants.totalCount,
+            ))
+
+        case .internalLinkTypeVideoChat(let value):
+            guard let chat = try? await service.searchPublicChat(username: value.chatUsername),
+                  chat.videoChat.groupCallId != 0
+            else { return .unsupported }
+            return .confirmVideoChatJoin(TelegramPendingVideoChatJoin(
+                chatId: chat.id,
+                groupCallId: chat.videoChat.groupCallId,
+                inviteHash: value.inviteHash,
+                title: chat.title,
+                isLiveStream: value.isLiveStream,
+            ))
 
         case .internalLinkTypeMessage(let value):
             guard let info = try? await service.getMessageLinkInfo(url: value.url), info.chatId != 0 else {

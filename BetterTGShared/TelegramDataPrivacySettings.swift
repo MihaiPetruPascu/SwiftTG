@@ -5,14 +5,12 @@ import SwiftUI
 
 // MARK: - TelegramContactsSyncPreference
 
-/// Whether `PermissionsManager.requestPostLoginPermissions()` (iOS-only) is allowed to sync device
-/// contacts to the server after login. Defaults to on, matching the app's existing behavior before
-/// this preference existed - so upgrading users keep syncing unless they explicitly turn it off.
+/// Whether the user explicitly chose to sync device contacts to Telegram.
 enum TelegramContactsSyncPreference {
     // MARK: Internal
 
     static var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+        get { UserDefaults.standard.object(forKey: key) as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 
@@ -39,7 +37,9 @@ struct TelegramDataPrivacySettingsView: View {
                 Toggle("Sync Contacts", isOn: syncContactsBinding)
                     .disabled(isSyncingContacts)
             } footer: {
-                Text("Turn on to continuously sync contacts from this device with your account.")
+                Text(
+                    "When enabled, SwiftTG sends names and phone numbers from this device to Telegram to find people you know.",
+                )
             }
             #endif
 
@@ -84,74 +84,75 @@ struct TelegramDataPrivacySettingsView: View {
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task {
-            guard !hasLoaded else { return }
-            hasLoaded = true
-            await loadFrequentContactsSetting()
-        }
-        .confirmationDialog(
-            "Delete synced contacts?",
-            isPresented: $confirmsDeleteContacts,
-            titleVisibility: .visible,
-        ) {
-            Button("Delete", role: .destructive) { Task { await deleteSyncedContacts() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "This will remove your contacts from the Telegram servers. " +
-                    "If \"Sync Contacts\" is enabled, contacts will be re-synced.",
-            )
-        }
-        .confirmationDialog(
-            "Delete frequent contacts data?",
-            isPresented: $confirmsDeleteFrequentContacts,
-            titleVisibility: .visible,
-        ) {
-            Button("Delete", role: .destructive) { Task { await deleteFrequentContacts() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will delete all data about the people you message frequently as well the inline bots you are likely to use.")
-        }
-        .confirmationDialog(
-            "Delete all cloud drafts?",
-            isPresented: $confirmsDeleteDrafts,
-            titleVisibility: .visible,
-        ) {
-            Button("Delete", role: .destructive) { Task { await deleteAllCloudDrafts() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Drafts will be removed from all your chats.")
-        }
-        .confirmationDialog(
-            "Clear payment & shipping info?",
-            isPresented: $confirmsClearPaymentInfo,
-            titleVisibility: .visible,
-        ) {
-            Button("Clear Payment Info", role: .destructive) {
-                Task { await clearPaymentInfo(paymentInfo: true, shippingInfo: false) }
+            .task {
+                guard !hasLoaded else { return }
+                hasLoaded = true
+                await loadFrequentContactsSetting()
             }
-            Button("Clear Shipping Info", role: .destructive) {
-                Task { await clearPaymentInfo(paymentInfo: false, shippingInfo: true) }
+            .alert(
+                "Delete synced contacts?",
+                isPresented: $confirmsDeleteContacts,
+            ) {
+                Button("Delete", role: .destructive) { Task { await deleteSyncedContacts() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "This will remove your contacts from the Telegram servers. " +
+                        "If \"Sync Contacts\" is enabled, contacts will be re-synced.",
+                )
             }
-            Button("Clear Both", role: .destructive) {
-                Task { await clearPaymentInfo(paymentInfo: true, shippingInfo: true) }
+            .alert(
+                "Delete frequent contacts data?",
+                isPresented: $confirmsDeleteFrequentContacts,
+            ) {
+                Button("Delete", role: .destructive) { Task { await deleteFrequentContacts() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "This will delete all data about the people you message frequently as well the inline bots you are likely to use.",
+                )
             }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert(statusMessage ?? "", isPresented: statusMessageIsPresented) {
-            Button("OK") {}
-        }
-        .alert("Couldn't Complete Request", isPresented: errorIsPresented) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage ?? "")
-        }
+            .alert(
+                "Delete all cloud drafts?",
+                isPresented: $confirmsDeleteDrafts,
+            ) {
+                Button("Delete", role: .destructive) { Task { await deleteAllCloudDrafts() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Drafts will be removed from all your chats.")
+            }
+            .alert(
+                "Clear payment & shipping info?",
+                isPresented: $confirmsClearPaymentInfo,
+            ) {
+                Button("Clear Payment Info", role: .destructive) {
+                    Task { await clearPaymentInfo(paymentInfo: true, shippingInfo: false) }
+                }
+                Button("Clear Shipping Info", role: .destructive) {
+                    Task { await clearPaymentInfo(paymentInfo: false, shippingInfo: true) }
+                }
+                Button("Clear Both", role: .destructive) {
+                    Task { await clearPaymentInfo(paymentInfo: true, shippingInfo: true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert(statusMessage ?? "", isPresented: statusMessageIsPresented) {
+                Button("OK") {}
+            }
+            .alert("Couldn't Complete Request", isPresented: errorIsPresented) {
+                Button("OK") {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
     }
 
     // MARK: Private
 
     private static let frequentContactsOptionName = "disable_top_chats"
-    private static let frequentContactsCategories: [TopChatCategory] = [.topChatCategoryUsers, .topChatCategoryInlineBots]
+    private static let frequentContactsCategories: [TopChatCategory] = [
+        .topChatCategoryUsers,
+        .topChatCategoryInlineBots,
+    ]
 
     @State private var confirmsClearPaymentInfo = false
     @State private var confirmsDeleteContacts = false
@@ -243,7 +244,13 @@ struct TelegramDataPrivacySettingsView: View {
     @MainActor private func syncContactsNow() async {
         isSyncingContacts = true
         defer { isSyncingContacts = false }
-        await PermissionsManager.shared.requestPostLoginPermissions()
+        let didSync = await PermissionsManager.shared.requestAndSyncContacts()
+        guard !didSync else { return }
+        syncContactsEnabled = false
+        TelegramContactsSyncPreference.isEnabled = false
+        errorMessage = PermissionsManager.shared.contactsAuthorizationStatus == .denied
+            ? "Contacts access is off. You can allow it in the Settings app."
+            : "SwiftTG couldn't sync your contacts. Please try again."
     }
     #endif
 
@@ -306,12 +313,13 @@ struct TelegramDataPrivacySettingsView: View {
             if shippingInfo {
                 _ = try await service.deleteSavedOrderInfo()
             }
-            statusMessage = switch (paymentInfo, shippingInfo) {
-            case (true, true): "Payment and shipping info cleared."
-            case (true, false): "Payment info cleared."
-            case (false, true): "Shipping info cleared."
-            case (false, false): ""
-            }
+            statusMessage =
+                switch (paymentInfo, shippingInfo) {
+                case (true, true): "Payment and shipping info cleared."
+                case (true, false): "Payment info cleared."
+                case (false, true): "Shipping info cleared."
+                case (false, false): ""
+                }
         } catch {
             errorMessage = telegramErrorDescription(error)
         }

@@ -130,6 +130,21 @@ enum TelegramVideoNoteCameraPosition: Sendable {
         onFinished: @escaping @MainActor (TelegramVideoNoteRecordingArtifact, TelegramVideoNoteDeliveryOptions) -> Void,
     ) async {
         guard !isPreparing, !isRecording, !isPaused, !isFinalizing else { return }
+
+        // A not-yet-decided camera/mic prompt steals the press that started this recording, so it
+        // would half-start once granted. Only ask here; the user presses and holds again to record.
+        let videoStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        let audioStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if videoStatus == .notDetermined || audioStatus == .notDetermined {
+            if videoStatus == .notDetermined {
+                _ = await AVCaptureDevice.requestAccess(for: .video)
+            }
+            if audioStatus == .notDetermined {
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+            }
+            return
+        }
+
         isPreparing = true
         errorMessage = nil
         completion = onFinished
@@ -529,20 +544,22 @@ enum TelegramVideoNoteCameraPosition: Sendable {
     #if os(iOS)
     private func configureAudioSessionForRecording() throws {
         let audioSession = AVAudioSession.sharedInstance()
-        var options: AVAudioSession.CategoryOptions = [
+        // No `.mixWithOthers`, ever - see `Media.setAudioSessionRecord()`'s matching comment.
+        // Letting other audio keep playing through the speaker while recording risks it bleeding
+        // into the recorded video note itself.
+        let options: AVAudioSession.CategoryOptions = [
             .allowBluetoothHFP,
             .defaultToSpeaker,
             .overrideMutedMicrophoneInterruption,
         ]
-        if UIAccessibility.isVoiceOverRunning {
-            options.insert(.mixWithOthers)
-        }
         try audioSession.setCategory(
             .playAndRecord,
             mode: .videoRecording,
             policy: .default,
             options: options,
         )
+        // Documented to suppress system sounds/haptics for the duration of the recording.
+        try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(false)
         try audioSession.setActive(true)
     }
     #endif

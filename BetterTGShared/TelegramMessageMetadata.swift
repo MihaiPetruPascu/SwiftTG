@@ -11,6 +11,19 @@ func telegramMessageContentDescription(_ message: Message) -> String {
     if case .messageSupergroupChatCreate = message.content, message.isChannelPost {
         return "Channel created"
     }
+    if case .messageCall(let content) = message.content {
+        return TelegramCallMessagePresentation(
+            content: content,
+            isOutgoing: message.isOutgoing,
+        ).contentDescription
+    }
+    if case .messageGroupCall(let content) = message.content {
+        return TelegramGroupCallMessagePresentation(
+            content: content,
+            isOutgoing: message.isOutgoing,
+            messageDate: message.date,
+        ).contentDescription
+    }
     return telegramMessageContentDescription(message.content)
 }
 
@@ -18,6 +31,19 @@ func telegramMessageContentDescription(_ message: Message) -> String {
 /// Match Telegram-iOS by preferring an album caption and otherwise identifying the grouped
 /// media as an album, without guessing an item count that isn't available here.
 func telegramChatListMessageDescription(_ message: Message) -> String {
+    if case .messageCall(let content) = message.content {
+        return TelegramCallMessagePresentation(
+            content: content,
+            isOutgoing: message.isOutgoing,
+        ).title
+    }
+    if case .messageGroupCall(let content) = message.content {
+        return TelegramGroupCallMessagePresentation(
+            content: content,
+            isOutgoing: message.isOutgoing,
+            messageDate: message.date,
+        ).title
+    }
     guard message.mediaAlbumId != 0 else {
         return telegramMessageContentDescription(message)
     }
@@ -83,6 +109,8 @@ func telegramMessageContentDescription(_ content: MessageContent) -> String {
         content.sticker.emoji.isEmpty ? "Sticker" : "Sticker \(content.sticker.emoji)"
     case .messageCall:
         "Call"
+    case .messageGroupCall(let content):
+        content.wasMissed ? "Declined Group Call" : "Group Call"
     case .messageBasicGroupChatCreate, .messageSupergroupChatCreate:
         "Group created"
     case .messageChatChangeTitle:
@@ -140,6 +168,48 @@ func telegramChatListTimestamp(
         return date.formatted(date: .omitted, time: .shortened)
     }
     return date.formatted(.dateTime.month(.abbreviated).day())
+}
+
+/// Date label for a Recent Calls row: always carries the time (a call list has few rows and the
+/// time matters), with a relative day name for anything within the past week.
+func telegramCallListTimestamp(
+    _ timestamp: Int,
+    relativeTo now: Foundation.Date = Foundation.Date(),
+    calendar: Calendar = .autoupdatingCurrent,
+) -> String {
+    let date = Foundation.Date(timeIntervalSince1970: TimeInterval(timestamp))
+    let time = date.formatted(date: .omitted, time: .shortened)
+    if calendar.isDateInToday(date) {
+        return time
+    }
+    if calendar.isDateInYesterday(date) {
+        return "Yesterday \(time)"
+    }
+    let dayGap = calendar.dateComponents(
+        [.day],
+        from: calendar.startOfDay(for: date),
+        to: calendar.startOfDay(for: now),
+    )
+    .day ?? .max
+    if (1..<7).contains(dayGap) {
+        return "\(date.formatted(.dateTime.weekday(.abbreviated))) \(time)"
+    }
+    if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+        return "\(date.formatted(.dateTime.month(.abbreviated).day())), \(time)"
+    }
+    return "\(date.formatted(.dateTime.year().month(.abbreviated).day())), \(time)"
+}
+
+/// Call duration as `m:ss`, or `h:mm:ss` once it passes an hour.
+func telegramCallDurationClock(_ seconds: Int) -> String {
+    let value = max(0, seconds)
+    let hours = value / 3600
+    let minutes = (value % 3600) / 60
+    let remainingSeconds = value % 60
+    if hours > 0 {
+        return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+    }
+    return String(format: "%d:%02d", minutes, remainingSeconds)
 }
 
 func telegramMessageDayHeading(

@@ -22,12 +22,16 @@ final class TelegramSession: @unchecked Sendable {
     // MARK: Lifecycle
 
     init() {
-        _ = internalClient
+        self.internalClient = makeClient()
     }
 
     // MARK: Internal
 
-    var client: TDLibClient { internalClient }
+    var client: TDLibClient {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return internalClient
+    }
 
     var authorizationStatePublisher: AnyPublisher<AuthorizationState, Never> {
         updateStore.authorizationStatePublisher
@@ -49,8 +53,20 @@ final class TelegramSession: @unchecked Sendable {
         updateStore.availableMessageEffectsPublisher
     }
 
+    var reactionNotificationSettingsPublisher: AnyPublisher<ReactionNotificationSettings?, Never> {
+        updateStore.reactionNotificationSettingsPublisher
+    }
+
     var updatePublisher: AnyPublisher<Update, Never> {
         updateStore.updatePublisher
+    }
+
+    var callPublisher: AnyPublisher<Call?, Never> {
+        updateStore.callPublisher
+    }
+
+    var callSignalingDataPublisher: AnyPublisher<UpdateNewCallSignalingData, Never> {
+        updateStore.callSignalingDataPublisher
     }
 
     func filePublisher(fileId: Int) -> AnyPublisher<File, Never> {
@@ -94,43 +110,72 @@ final class TelegramSession: @unchecked Sendable {
         self.configuration = configuration
         stateLock.unlock()
 
-        try? client.setLogStream(logStream: .logStreamEmpty) { _ in }
         configureIfReady()
     }
 
     func close() {
+        stateLock.lock()
+        isClosingSession = true
+        stateLock.unlock()
         manager.closeClients()
     }
 
     // MARK: Private
 
-    private lazy var internalClient: TDLibClient = manager.createClient { [weak self] data, client in
-        guard let self else { return }
-        do {
-            let update = try client.decoder.decode(Update.self, from: normalizedUpdateData(data))
-            process(update)
-        } catch {
-            print("TDLib update decoding failed: \(error)")
-        }
-    }
-
+    private var internalClient: TDLibClient!
     private var configuration: TelegramSessionConfiguration?
+    private var configuringClientId: Int32?
     private var isConfiguringParameters = false
+    private var isClosingSession = false
+    private var isReplacingClient = false
     private var isWaitingForParameters = false
     private var hasEnabledIncomingCalls = false
     private let manager = TDLibClientManager()
     private let stateLock = NSLock()
     private let updateStore = TelegramUpdateStore()
 
-    private func process(_ update: Update) {
+    private func decodeUpdate(from data: Data, using decoder: JSONDecoder) throws -> Update {
+        do {
+            return try decoder.decode(Update.self, from: data)
+        } catch let originalError {
+            // Foundation's convertFromSnakeCase maps `p2p` to `P2P`, while TDLibKit's
+            // generated Swift properties are named `P2p`. Normalize only the two TDLib call
+            // keys affected by this acronym/number edge case, then retry the failed update.
+            guard let compatibleData = TDLibJSONCompatibility.normalizingCallP2PKeys(in: data),
+                  compatibleData != data
+            else {
+                throw originalError
+            }
+            return try decoder.decode(Update.self, from: compatibleData)
+        }
+    }
+
+    private func makeClient() -> TDLibClient {
+        let client = manager.createClient { [weak self] data, client in
+            guard let self else { return }
+            do {
+                let update = try decodeUpdate(from: data, using: client.decoder)
+                process(update, from: client)
+            } catch {
+                print("TDLib update decoding failed: \(error)")
+            }
+        }
+        try? client.setLogStream(logStream: .logStreamEmpty) { _ in }
+        return client
+    }
+
+    private func process(_ update: Update, from client: TDLibClient) {
         if case .updateAuthorizationState(let value) = update {
-            if case .authorizationStateWaitTdlibParameters = value.authorizationState {
+            switch value.authorizationState {
+            case .authorizationStateWaitTdlibParameters:
                 stateLock.lock()
                 isWaitingForParameters = true
                 stateLock.unlock()
                 configureIfReady()
-            } else if case .authorizationStateReady = value.authorizationState {
-                enableIncomingCallsIfNeeded()
+            case .authorizationStateClosed:
+                replaceClosedClientIfNeeded(client)
+            default:
+                break
             }
         }
         updateStore.publish(update)
@@ -169,17 +214,22 @@ final class TelegramSession: @unchecked Sendable {
         stateLock.lock()
         guard isWaitingForParameters,
               !isConfiguringParameters,
+              !isReplacingClient,
               let configuration
         else {
             stateLock.unlock()
             return
         }
+        // Read the current client under the lock, after the guard, so a `replaceClosedClientIfNeeded`
+        // swap can't leave this configuring the stale (closed) instance.
+        let activeClient = internalClient!
         isConfiguringParameters = true
+        configuringClientId = activeClient.id
         stateLock.unlock()
 
-        Task { [weak self, client] in
+        Task { [weak self, activeClient] in
             do {
-                try await client.setTdlibParameters(
+                try await activeClient.setTdlibParameters(
                     apiHash: configuration.apiHash,
                     apiId: configuration.apiId,
                     applicationVersion: configuration.applicationVersion,
@@ -199,41 +249,99 @@ final class TelegramSession: @unchecked Sendable {
                 // (`NotificationManager::DEFAULT_GROUP_COUNT_MAX`), which disables it outright -
                 // it never emits `updateNotificationGroup` at all until told otherwise. 25 matches
                 // Unigram's own TDLib client setup (another TDLib-based client, checked directly).
-                _ = try? await client.setOption(
+                _ = try? await activeClient.setOption(
                     name: "notification_group_count_max",
                     value: .optionValueInteger(.init(value: 25)),
                 )
+                self?.finishConfiguration(clientId: activeClient.id, succeeded: true)
             } catch {
-                self?.resetConfigurationAttempt()
+                self?.finishConfiguration(clientId: activeClient.id, succeeded: false)
                 print("TDLib configuration failed: \(error)")
             }
         }
     }
 
-    private func resetConfigurationAttempt() {
+    private func finishConfiguration(clientId: Int32, succeeded: Bool) {
         stateLock.lock()
-        isConfiguringParameters = false
-        stateLock.unlock()
-    }
-
-    private func resetIncomingCallsAttempt() {
-        stateLock.lock()
-        hasEnabledIncomingCalls = false
-        stateLock.unlock()
-    }
-
-    private func normalizedUpdateData(_ data: Data) -> Data {
-        guard let json = String(data: data, encoding: .utf8),
-              json.contains("\"allow_p2p\"") || json.contains("\"udp_p2p\"")
-        else {
-            return data
+        guard configuringClientId == clientId else {
+            stateLock.unlock()
+            return
         }
-        // JSONDecoder.convertFromSnakeCase preserves a capitalized trailing
-        // acronym (P2P), while TDLibKit generates properties ending in `P2p`.
-        let normalized = json
-            .replacingOccurrences(of: "\"allow_p2p\"", with: "\"allowP2p\"")
-            .replacingOccurrences(of: "\"udp_p2p\"", with: "\"udpP2p\"")
-        return Data(normalized.utf8)
+        isConfiguringParameters = false
+        configuringClientId = nil
+        if succeeded {
+            isWaitingForParameters = false
+        }
+        stateLock.unlock()
     }
 
+    /// `authorizationStateClosed` is terminal for a TDLib client. Logging out closes that client,
+    /// so continuing with the same instance leaves every subsequent login request unanswered.
+    /// Create a fresh client unless the app itself is terminating and deliberately closing TDLib.
+    private func replaceClosedClientIfNeeded(_ closedClient: TDLibClient) {
+        stateLock.lock()
+        guard !isClosingSession,
+              !isReplacingClient,
+              internalClient === closedClient
+        else {
+            stateLock.unlock()
+            return
+        }
+        isReplacingClient = true
+        isConfiguringParameters = false
+        configuringClientId = nil
+        stateLock.unlock()
+
+        updateStore.reset()
+        let replacement = makeClient()
+
+        stateLock.lock()
+        internalClient = replacement
+        isReplacingClient = false
+        stateLock.unlock()
+
+        // The replacement's own `authorizationStateWaitTdlibParameters` may already have been
+        // processed (and skipped, because `isReplacingClient` was set) before `internalClient`
+        // pointed at it. Re-drive configuration now that it does; it's a no-op otherwise.
+        configureIfReady()
+    }
+}
+
+// MARK: - TDLibJSONCompatibility
+
+private enum TDLibJSONCompatibility {
+    // MARK: Internal
+
+    static func normalizingCallP2PKeys(in data: Data) -> Data? {
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let normalized = normalize(json),
+              JSONSerialization.isValidJSONObject(normalized)
+        else {
+            return nil
+        }
+        return try? JSONSerialization.data(withJSONObject: normalized)
+    }
+
+    // MARK: Private
+
+    private static func normalize(_ value: Any) -> Any? {
+        if let dictionary = value as? [String: Any] {
+            return dictionary.reduce(into: [String: Any]()) { result, element in
+                let key =
+                    switch element.key {
+                    case "allow_p2p":
+                        "allowP2p"
+                    case "udp_p2p":
+                        "udpP2p"
+                    default:
+                        element.key
+                    }
+                result[key] = normalize(element.value)
+            }
+        }
+        if let array = value as? [Any] {
+            return array.compactMap(normalize)
+        }
+        return value
+    }
 }

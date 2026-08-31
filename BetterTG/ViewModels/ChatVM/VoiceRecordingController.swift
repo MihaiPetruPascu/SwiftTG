@@ -34,8 +34,8 @@ import TDLibKit
         let timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] timer in
             nonisolated(unsafe) let timer = timer
             MainActor.assumeIsolated {
-                guard let self, let audioRecorder = self.audioRecorder else { return }
-                self.wave.append(audioRecorder.currentPeakPower())
+                guard let self else { return }
+                self.wave.append(self.audioRecorder.currentPeakPower())
                 self.timerCount += timer.timeInterval
             }
         }
@@ -50,25 +50,32 @@ import TDLibKit
     }
 
     func mediaStartRecordingVoice() async {
-        Media.shared.stop()
-        Media.shared.setAudioSessionRecord()
-
-        let granted = await AVAudioApplication.requestRecordPermission()
-        if granted {
-            log("Access to Microphone for Voice messages is granted")
-        } else {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            break
+        case .denied:
             log("Access to Microphone for Voice messages is not granted")
             errorShown = true
             return
+        case .undetermined:
+            // First time: only ask. The system alert steals the press that started this, so the
+            // recording would half-start (indicator shows, no send/cancel) once permission lands.
+            // Let the user press-and-hold again to record cleanly inside a live gesture.
+            _ = await AVAudioApplication.requestRecordPermission()
+            return
+        @unknown default:
+            _ = await AVAudioApplication.requestRecordPermission()
+            return
         }
+
+        Media.shared.stop()
+        Media.shared.setAudioSessionRecord()
 
         let url = TelegramVoiceNoteSending.temporaryFileURL()
         savedVoiceNoteUrl = url
 
         do {
-            let recorder = VoiceNoteRecorder()
-            try recorder.start()
-            audioRecorder = recorder
+            try audioRecorder.start(warmupDuration: 0)
             withAnimation {
                 recordingVoiceNote = true
                 recordingLocked = false
@@ -77,13 +84,12 @@ import TDLibKit
             }
             try? await tdSendChatAction(.chatActionRecordingVoiceNote)
         } catch {
-            log("Error creating AudioRecorder: \(error)")
+            log("Error starting AudioRecorder: \(error)")
         }
     }
 
     func cancelRecordingVoice() {
-        audioRecorder?.cancel()
-        audioRecorder = nil
+        audioRecorder.cancel()
         TelegramOutgoingFileStaging.shared.discard(fileURL: savedVoiceNoteUrl)
         withAnimation {
             recordingVoiceNote = false
@@ -98,7 +104,7 @@ import TDLibKit
     /// `nil` if finalizing failed (in which case this already self-cancels and cleans up).
     func mediaStopRecordingVoice(duration: Int, wave: [Float])
     -> (url: URL, duration: Int, waveform: Data, isViewOnce: Bool)? {
-        guard let audioRecorder else { return nil }
+        guard recordingVoiceNote else { return nil }
         let sendsAsViewOnce = isViewOnce
         let encodedDuration: Int
         do {
@@ -108,7 +114,6 @@ import TDLibKit
             cancelRecordingVoice()
             return nil
         }
-        self.audioRecorder = nil
         withAnimation {
             recordingVoiceNote = false
             recordingLocked = false
@@ -134,7 +139,9 @@ import TDLibKit
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var savedVoiceNoteUrl = URL(filePath: "")
-    @ObservationIgnored private var audioRecorder: VoiceNoteRecorder?
+    /// Created once and reused across every recording in this chat visit, instead of a fresh
+    /// `VoiceNoteRecorder()` (and so a fresh `AVAudioEngine()`) per recording.
+    @ObservationIgnored private let audioRecorder = VoiceNoteRecorder()
 
     private func tdSendChatAction(_ chatAction: ChatAction) async throws {
         _ = try await service.sendChatAction(

@@ -48,6 +48,26 @@ final class TelegramUpdateStore: @unchecked Sendable {
         availableMessageEffectsSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
+    /// Same `CurrentValueSubject` reasoning as `chatFoldersPublisher` - TDLib pushes
+    /// `updateReactionNotificationSettings` once early in the session with no matching getter, so a
+    /// Notifications screen opened afterward needs the value replayed, not just future changes.
+    var reactionNotificationSettingsPublisher: AnyPublisher<ReactionNotificationSettings?, Never> {
+        reactionNotificationSettingsSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
+    /// Same `CurrentValueSubject` reasoning as `chatFoldersPublisher` - a call screen presented
+    /// after `updateCall` already fired (e.g. CallKit reporting the call before the in-app screen
+    /// finishes appearing) still needs the call's current state, not just its next transition.
+    var callPublisher: AnyPublisher<Call?, Never> {
+        callSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
+    /// `PassthroughSubject`, unlike `callPublisher` - signaling packets are one-shot events to feed
+    /// into the call engine as they arrive, not state to replay to a subscriber that missed one.
+    var callSignalingDataPublisher: AnyPublisher<UpdateNewCallSignalingData, Never> {
+        callSignalingDataSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
     func messagePublisher(chatId: Int64) -> AnyPublisher<TelegramMessageSnapshot, Never> {
         messageStore.publisher(chatId: chatId)
     }
@@ -79,9 +99,30 @@ final class TelegramUpdateStore: @unchecked Sendable {
         fileStore.mergeInitial(file)
     }
 
+    /// Remove every account-derived value before a fresh TDLib client starts a new login.
+    func reset() {
+        queue.async { [
+            chatFoldersSubject, unreadChatCountSubject, availableMessageEffectsSubject,
+            reactionNotificationSettingsSubject, callSubject,
+        ] in
+            dispatchPrecondition(condition: .onQueue(self.queue))
+            self.chatListStore.reset()
+            self.fileStore.reset()
+            self.messageStore.reset()
+            chatFoldersSubject.send(nil)
+            unreadChatCountSubject.send(nil)
+            availableMessageEffectsSubject.send(nil)
+            reactionNotificationSettingsSubject.send(nil)
+            callSubject.send(nil)
+        }
+    }
+
     func publish(_ update: Update) {
         queue.async {
-            [updateSubject, chatFoldersSubject, unreadChatCountSubject, availableMessageEffectsSubject] in
+            [
+                updateSubject, chatFoldersSubject, unreadChatCountSubject, availableMessageEffectsSubject,
+                reactionNotificationSettingsSubject, callSubject, callSignalingDataSubject,
+            ] in
             dispatchPrecondition(condition: .onQueue(self.queue))
             self.chatListStore.reduce(update)
             self.fileStore.reduce(update)
@@ -95,6 +136,20 @@ final class TelegramUpdateStore: @unchecked Sendable {
             if case .updateAvailableMessageEffects(let value) = update {
                 availableMessageEffectsSubject.send(value)
             }
+            if case .updateReactionNotificationSettings(let value) = update {
+                reactionNotificationSettingsSubject.send(value.notificationSettings)
+            }
+            if case .updateCall(let value) = update {
+                // Deliver the terminal Call as-is (discarded/error included) rather than collapsing
+                // it to nil here - TelegramCallSession's own state machine already treats those
+                // states as "call ended" and clears `activeCall`, but it needs the real state first
+                // to know (and log) *why*, e.g. the discard reason or error code. Collapsing here
+                // discarded that information before it could ever be observed.
+                callSubject.send(value.call)
+            }
+            if case .updateNewCallSignalingData(let value) = update {
+                callSignalingDataSubject.send(value)
+            }
             updateSubject.send(update)
         }
     }
@@ -104,6 +159,9 @@ final class TelegramUpdateStore: @unchecked Sendable {
     private let chatFoldersSubject = CurrentValueSubject<UpdateChatFolders?, Never>(nil)
     private let unreadChatCountSubject = CurrentValueSubject<UpdateUnreadChatCount?, Never>(nil)
     private let availableMessageEffectsSubject = CurrentValueSubject<UpdateAvailableMessageEffects?, Never>(nil)
+    private let reactionNotificationSettingsSubject = CurrentValueSubject<ReactionNotificationSettings?, Never>(nil)
+    private let callSubject = CurrentValueSubject<Call?, Never>(nil)
+    private let callSignalingDataSubject = PassthroughSubject<UpdateNewCallSignalingData, Never>()
     private let chatListStore = TelegramChatListStore()
     private let fileStore = TelegramFileStore()
     private let messageStore = TelegramMessageStore()

@@ -1,5 +1,6 @@
 // RootVM+Notifications.swift
 
+import AudioToolbox
 import Foundation
 import TDLibKit
 import UIKit
@@ -88,7 +89,30 @@ extension RootVM {
         else { return }
 
         pendingNotificationTarget = nil
-        navigate(to: .customChat(customChat, messageId: nil))
+        openChatReplacingStack(customChat)
+    }
+
+    /// Telegram surfaces a notification's chat as a fresh top-level screen: any chat already
+    /// pushed is replaced, so Back returns to the chat list - not to whichever chat the user
+    /// happened to have open when the notification arrived. Used for both the system push tap
+    /// and the in-app banner tap.
+    @MainActor private func openChatReplacingStack(_ customChat: CustomChat) {
+        if case .customChat(let current, _, _) = path.last, current.id == customChat.id {
+            return
+        }
+        guard !path.isEmpty else {
+            path.append(.customChat(customChat))
+            return
+        }
+        // Swapping the whole stack in one assignment (`[chatA]` -> `[chatB]`) doesn't reliably
+        // navigate in `NavigationStack` when both entries are the same `Route` case - it keeps the
+        // mounted destination. Pop to root, then push on the next runloop turn so SwiftUI processes
+        // each step.
+        path.removeAll()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.path.append(.customChat(customChat))
+        }
     }
 
     private func customChat(forBasicGroupId basicGroupId: Int64) async -> CustomChat? {
@@ -112,41 +136,60 @@ extension RootVM {
     /// backgrounded/killed notifications go through the plain system push path untouched, same as
     /// before.
     @MainActor func handleNotificationGroupUpdate(_ group: UpdateNotificationGroup) {
-        guard UIApplication.shared.applicationState == .active,
-              currentlyOpenChatId != group.chatId
+        guard UIApplication.shared.applicationState == .active else { return }
+
+        // A group update for the chat that's already on screen means those messages are being
+        // read - clear any system notifications that were delivered for it while backgrounded.
+        if currentlyOpenChatId == group.chatId {
+            Task { @MainActor [weak self] in
+                guard let self, let chat = await getCustomChat(from: group.chatId)?.chat else { return }
+                TelegramDeliveredNotifications.clear(for: chat)
+            }
+            return
+        }
+
+        // TDLib re-sends `updateNotificationGroup` for every chat that still has pending
+        // notifications whenever it (re)connects, so on launch a backlog spread across many chats
+        // would otherwise banner and play a sound for each one. Surface only the newest notification
+        // in the group, and only if it actually arrived after the app came to the foreground -
+        // mirroring Telegram-iOS, which presents just `messageList.last` and suppresses anything
+        // older than `delayNotificatonsUntil`.
+        let baseline = notificationBannerActiveSince.timeIntervalSince1970 - Self.notificationBannerBacklogGrace
+        guard let notification = group.addedNotifications
+            .filter({ TimeInterval($0.date) >= baseline })
+            .max(by: { $0.date < $1.date }),
+            let body = Self.inAppNotificationBody(notification)
         else { return }
 
-        for notification in group.addedNotifications {
-            // Matches `MacSessionModel+Notifications.swift`'s own freshness check - avoids
-            // surfacing a banner for a notification that's actually old news (e.g. a burst of
-            // updates catching the client up after a brief connectivity gap).
-            guard Date().timeIntervalSince1970 - TimeInterval(notification.date) < 3600,
-                  let body = Self.inAppNotificationBody(notification)
-            else { continue }
-
-            let chatId = group.chatId
-            let bannerId = "\(group.notificationGroupId)-\(notification.id)"
-            let isSilent = notification.isSilent
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let title = await getCustomChat(from: chatId)?.displayTitle ?? "SwiftTG"
-                guard currentlyOpenChatId != chatId else { return }
-                enqueueInAppNotification(TelegramInAppNotificationBanner(
-                    id: bannerId,
-                    chatId: chatId,
-                    title: title,
-                    body: body,
-                    isSilent: isSilent,
-                ))
-            }
+        let chatId = group.chatId
+        let bannerId = "\(group.notificationGroupId)-\(notification.id)"
+        let isSilent = notification.isSilent
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let title = await getCustomChat(from: chatId)?.displayTitle ?? "SwiftTG"
+            guard currentlyOpenChatId != chatId else { return }
+            enqueueInAppNotification(TelegramInAppNotificationBanner(
+                id: bannerId,
+                chatId: chatId,
+                title: title,
+                body: body,
+                isSilent: isSilent,
+            ))
         }
+    }
+
+    /// Called on every foreground transition (see `BetterTGApp`). Rebasing the backlog gate here is
+    /// what keeps the notifications TDLib replays on reconnect from bannering - only messages that
+    /// land while the app is genuinely in front of the user do.
+    @MainActor func noteAppBecameActive() {
+        notificationBannerActiveSince = Date()
     }
 
     @MainActor func openInAppNotification(_ banner: TelegramInAppNotificationBanner) {
         dismissInAppNotification()
         Task { @MainActor [weak self] in
             guard let self, let chat = await getCustomChat(from: banner.chatId) else { return }
-            navigate(to: .customChat(chat))
+            openChatReplacingStack(chat)
         }
     }
 
@@ -158,20 +201,29 @@ extension RootVM {
 
     // MARK: Private
 
-    private static let inAppNotificationDisplayDuration: Duration = .seconds(4)
+    private static let inAppNotificationDisplayDuration = Duration.seconds(4)
+
+    /// Tolerance for skew between the device wall clock and TDLib's server-set `notification.date`
+    /// when deciding whether a notification predates the last foreground transition.
+    private static let notificationBannerBacklogGrace: TimeInterval = 3
 
     /// Mirrors `MacSessionModel+Notifications.swift`'s `notificationBody(_:)` - kept in sync by
     /// hand since the two run against different live connections (iOS's single global `TDLib`
     /// singleton vs. each Mac window's own `MacSessionModel.service`), not because the logic itself
     /// should ever actually differ between platforms.
     private static func inAppNotificationBody(_ notification: TDLibKit.Notification) -> String? {
+        let showsPreview = TelegramInAppNotificationPreferences.previewsEnabled
         switch notification.type {
         case .notificationTypeNewMessage(let value):
             guard !value.message.isOutgoing else { return nil }
-            return value.showPreview ? telegramMessageContentDescription(value.message) : "You have a new message."
+            return value.showPreview && showsPreview
+                ? telegramMessageContentDescription(value.message)
+                : "You have a new message."
         case .notificationTypeNewPushMessage(let value):
             guard !value.isOutgoing else { return nil }
-            return value.senderName.isEmpty ? "You have a new message." : "New message from \(value.senderName)."
+            return showsPreview && !value.senderName.isEmpty
+                ? "New message from \(value.senderName)."
+                : "You have a new message."
         case .notificationTypeNewCall, .notificationTypeNewSecretChat:
             return nil
         }
@@ -181,6 +233,15 @@ extension RootVM {
         guard inAppNotificationBanner?.id != banner.id,
               !pendingInAppNotificationBanners.contains(where: { $0.id == banner.id })
         else { return }
+
+        // One banner per chat, like Telegram-iOS's `removeItemsWithGroupingKey(peerId)`: a newer
+        // message from a chat refreshes its banner in place (or replaces its queued one) instead of
+        // stacking another behind it.
+        if inAppNotificationBanner?.chatId == banner.chatId {
+            presentInAppNotification(banner)
+            return
+        }
+        pendingInAppNotificationBanners.removeAll { $0.chatId == banner.chatId }
         guard inAppNotificationBanner == nil else {
             pendingInAppNotificationBanners.append(banner)
             return
@@ -190,7 +251,12 @@ extension RootVM {
 
     @MainActor private func presentInAppNotification(_ banner: TelegramInAppNotificationBanner) {
         inAppNotificationBanner = banner
-        ServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: banner.isSilent)
+        if TelegramInAppNotificationPreferences.soundEnabled {
+            ServiceSoundManager.shared.playIncomingMessageIfAppropriate(isMuted: banner.isSilent)
+        }
+        if !banner.isSilent, TelegramInAppNotificationPreferences.vibrateEnabled {
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        }
         inAppNotificationDismissTask?.cancel()
         inAppNotificationDismissTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.inAppNotificationDisplayDuration)
